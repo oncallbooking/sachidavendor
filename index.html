@@ -1,153 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Vendor Dashboard</title>
-<!-- DataTables CSS -->
-<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
-<!-- Chart.js -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<!-- jQuery -->
-<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<!-- DataTables JS -->
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<!-- SheetJS -->
-<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Sachida's RDSO Vendor Map - Interactive Railway Vendor Directory</title>
+    <meta name="description" content="Explore RDSO approved rail...pliers for rail components, fasteners, and railway materials." />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin="" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f4f8; }
-  h1 { text-align: center; margin-bottom: 20px; color: #1f4e79; }
-  .chart-container { width: 90%; margin: auto; margin-bottom: 40px; }
-  table.dataTable { width: 100% !important; margin-bottom: 40px; }
-  input[type="file"] { display: block; margin: 20px auto; }
-</style>
-</head>
-<body>
+    <!-- New CSS for Excel uploader, charts, and modal -->
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <!-- Existing app root (React/Vite) -->
+    <div id="root"></div>
 
-<h1>Vendor Insights Dashboard</h1>
+    <!-- NEW: UI for Excel upload + charts (keeps map/vendor UI intact) -->
+    <aside id="excel-sidebar" class="excel-sidebar">
+      <button id="open-uploader-btn" class="sidebar-btn">📊 Upload Excel Data</button>
+    </aside>
 
-<input type="file" id="excelFile" accept=".xlsx, .xls" />
+    <!-- Modal / Panel -->
+    <div id="excel-modal" class="excel-modal" aria-hidden="true">
+      <div class="excel-modal-content">
+        <header class="modal-header">
+          <h2>Upload Excel / CSV</h2>
+          <div class="modal-controls">
+            <button id="print-dashboard" title="Print dashboard">🖨️ Print</button>
+            <button id="close-uploader" aria-label="Close modal">✖</button>
+          </div>
+        </header>
 
-<div class="chart-container">
-  <canvas id="vendorChart"></canvas>
-</div>
+        <section class="upload-section">
+          <div id="drop-area" class="drop-area">
+            <p>Drag & drop a <strong>.xlsx</strong> or <strong>.csv</strong> file here — or</p>
+            <input id="file-input" type="file" accept=".xlsx,.xls,.csv" />
+            <label for="file-input" class="file-label">Choose a file</label>
+            <small id="upload-help">SheetJS will parse the file in the browser; files are not uploaded to a server.</small>
+          </div>
 
-<h2>Vendor Details Table</h2>
-<table id="vendorTable" class="display">
-  <thead>
-    <tr>
-      <th>SN</th>
-      <th>Item</th>
-      <th>Approved Vendors</th>
-      <th>Approved Capacity</th>
-      <th>Developmental Vendors</th>
-      <th>Developmental Capacity</th>
-      <th>Total Vendors</th>
-      <th>Total Capacity</th>
-    </tr>
-  </thead>
-  <tbody>
-    <!-- Data will be loaded dynamically from Excel -->
-  </tbody>
-</table>
+          <div class="controls-row">
+            <label>
+              Chart type:
+              <select id="chart-type-select">
+                <option value="auto">Auto-detect</option>
+                <option value="bar">Bar</option>
+                <option value="line">Line</option>
+                <option value="pie">Pie</option>
+                <option value="bubble">Bubble</option>
+              </select>
+            </label>
 
-<script>
-let vendorChart;
+            <label>
+              Max preview rows:
+              <input id="preview-rows" type="number" min="5" max="100" value="10" />
+            </label>
 
-document.getElementById('excelFile').addEventListener('change', function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
+            <button id="generate-charts" class="primary">Generate Charts</button>
+          </div>
+        </section>
 
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const data = new Uint8Array(e.target.result);
-    const workbook = XLSX.read(data, { type: 'array' });
-    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+        <section id="chart-area" class="chart-area" aria-live="polite">
+          <!-- Charts will be created here -->
+          <div id="chart-controls" class="chart-controls" style="display:none;">
+            <button id="download-all" title="Download all charts as PNG">⬇️ Download All Charts</button>
+          </div>
 
-    // Clear table
-    $('#vendorTable').DataTable().clear().destroy();
-    const tbody = $('#vendorTable tbody');
-    tbody.empty();
+          <div id="charts-grid" class="charts-grid"></div>
 
-    const chartLabels = [];
-    const totalVendorsData = [];
-    const totalCapacityData = [];
+          <details id="data-preview" class="data-preview">
+            <summary>Preview Data (first rows)</summary>
+            <div id="preview-table-wrap" class="preview-table-wrap"></div>
+          </details>
+        </section>
+      </div>
+    </div>
 
-    jsonData.forEach(row => {
-      tbody.append(`<tr style="background-color: ${Math.random() < 0.5 ? '#e6f7ff' : '#fff0f6'}">
-        <td>${row.SN}</td>
-        <td>${row.Item}</td>
-        <td>${row['Approved Vendors']}</td>
-        <td>${row['Approved Capacity']}</td>
-        <td>${row['Developmental Vendors']}</td>
-        <td>${row['Developmental Capacity']}</td>
-        <td>${row['Total Vendors']}</td>
-        <td>${row['Total Capacity']}</td>
-      </tr>`);
+    <!-- Leaflet and other libs used by the existing app -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 
-      chartLabels.push(row.Item);
-      totalVendorsData.push(row['Total Vendors']);
-      totalCapacityData.push(row['Total Capacity']);
-    });
+    <!-- React app entry (existing) -->
+    <script type="module" src="/src/main.tsx"></script>
 
-    // Initialize DataTable
-    $('#vendorTable').DataTable({
-      paging: true,
-      searching: true,
-      ordering: true
-    });
+    <!-- CDNs needed for the new feature -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-    // Destroy previous chart if exists
-    if (vendorChart) vendorChart.destroy();
-
-    const ctx = document.getElementById('vendorChart').getContext('2d');
-    vendorChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: chartLabels,
-        datasets: [
-          {
-            label: 'Total Vendors',
-            data: totalVendorsData,
-            backgroundColor: 'rgba(54, 162, 235, 0.7)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 1
-          },
-          {
-            label: 'Total Capacity',
-            data: totalCapacityData,
-            backgroundColor: 'rgba(255, 99, 132, 0.5)',
-            borderColor: 'rgba(255, 99, 132, 1)',
-            type: 'line',
-            yAxisID: 'y1'
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          y: {
-            beginAtZero: true,
-            title: { display: true, text: 'Vendors' }
-          },
-          y1: {
-            beginAtZero: true,
-            position: 'right',
-            title: { display: true, text: 'Capacity' },
-            grid: { drawOnChartArea: false }
-          }
-        },
-        plugins: {
-          tooltip: { mode: 'index', intersect: false }
-        }
-      }
-    });
-  };
-  reader.readAsArrayBuffer(file);
-});
-</script>
-
-</body>
+    <!-- New script to handle uploads, parsing, charting -->
+    <script src="./script.js" defer></script>
+  </body>
 </html>
