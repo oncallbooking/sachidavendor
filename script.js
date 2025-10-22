@@ -1,357 +1,486 @@
-/* Global Vendor Intelligence Dashboard - script.js */
+/* script.js
+   Fixed + functional integration for your uploaded index.html
+   - Handles XLSX/CSV uploads (sheet selection)
+   - Auto-detects columns, normalizes rows
+   - Renders Chart.js main chart + Leaflet map (#indiaMap)
+   - Basic filters, KPIs, exports
+*/
 
-/* Basic helpers */
-const qs = s => document.querySelector(s);
-const qsa = s => Array.from(document.querySelectorAll(s));
+(() => {
+  // Helpers
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
+  const noop = () => {};
 
-let vendors = []; // normalized vendor objects
-let map, markerCluster, markers = [];
-let tileLight, tileDark;
-let charts = {};
-let state = {mode: 'auto', theme: localStorage.getItem('gvid-theme') || 'light'};
+  // Elements (as in your index.html)
+  const uploadBtn = $('#uploadBtn');
+  const fileInput = $('#fileInput');
+  const uploadModal = $('#uploadModal');
+  const closeModal = $('#closeModal');
+  const sheetSelect = $('#sheetSelect');
+  const loadSelectedSheets = $('#loadSelectedSheets');
+  const welcomeScreen = $('#welcomeScreen');
+  const chartsGrid = $('#chartsGrid');
+  const controlsPanel = $('#controlsPanel');
+  const chartTypeSel = $('#chartType');
+  const topNInput = $('#topN');
+  const chartTitle = $('#chartTitle');
+  const mainChartCanvas = $('#mainChart');
+  const indiaMapEl = $('#indiaMap');
+  const mapStatus = $('#mapStatus');
+  const downloadChartBtn = $('#downloadChart');
+  const themeToggle = $('#themeToggle');
+  const rowCountEl = $('#rowCount');
+  const colCountEl = $('#colCount');
+  const quickStats = $('#quickStats');
+  const filtersSection = $('#filtersSection');
+  const filterContainer = $('#filterContainer');
+  const exportSection = $('#exportSection');
+  const dataTableEl = $('#dataTable');
+  const tableSection = $('#tableSection');
 
-/* Sample CSV dataset (used when user clicks "Load Sample") */
-const sampleCSV = `VendorName,Latitude,Longitude,City,Region,TotalSpend,TotalPayments,InvoiceCount,PaymentType,HasPO,InvoiceDate
-Acme Supplies,37.7749,-122.4194,San Francisco,North America,1250000,1200000,75,Credit,TRUE,2024-02-10
-Global Components,51.5074,-0.1278,London,EMEA,980000,980000,40,Wire,TRUE,2024-03-14
-Asia Parts Co,1.3521,103.8198,Singapore,APAC,420000,400000,28,Credit,FALSE,2024-01-20
-Continental Traders,-33.8688,151.2093,Sydney,APAC,780000,770000,32,Wire,TRUE,2024-04-02
-Nordic Supplies,59.3293,18.0686,Stockholm,EMEA,330000,330000,18,Card,FALSE,2024-05-12
-`;
+  // State
+  let workbookSheets = []; // {name, data: array of objects}
+  let currentRows = [];    // normalized rows
+  let map, markersLayer;
+  let mainChart;
+  let currentTheme = localStorage.getItem('dv-theme') || 'light';
 
-/* Column fuzzy mapping for auto-detection */
-const colMap = {
-  name: ['vendor', 'vendorname', 'name', 'supplier'],
-  lat: ['lat','latitude','y'],
-  lon: ['lon','lng','longitude','x'],
-  city: ['city','town'],
-  region: ['region','country','area'],
-  spend: ['spend','totalspend','sales','amount','total_spend'],
-  payments: ['payments','totalpayments','paid'],
-  invoices: ['invoicecount','invoices','invoice_count','invoice'],
-  paymentType: ['paymenttype','payment_method','payment'],
-  hasPO: ['haspo','po','purchaseorder','has_purchase_order'],
-  date: ['date','invoicedate','invoice_date']
-};
+  // Column fuzzy map
+  const colMap = {
+    name: ['vendor', 'vendorname', 'name', 'supplier'],
+    lat: ['lat','latitude','y'],
+    lon: ['lon','lng','longitude','x'],
+    city: ['city','town'],
+    region: ['region','country','area'],
+    spend: ['spend','totalspend','sales','amount','total_spend','total_spend_usd'],
+    payments: ['payments','totalpayments','paid'],
+    invoices: ['invoicecount','invoices','invoice_count','invoice'],
+    paymentType: ['paymenttype','payment_method','payment'],
+    hasPO: ['haspo','po','purchaseorder','has_purchase_order'],
+    date: ['date','invoicedate','invoice_date','paymentdate']
+  };
 
-function fuzzyFind(col){
-  if(!col) return null;
-  const key = col.trim().toLowerCase().replace(/\s|\.|_/g,'');
-  for(const k in colMap){
-    if(colMap[k].includes(key)) return k;
-  }
-  return null;
-}
-
-/* UI init */
-function initUI(){
-  qs('#file-input').addEventListener('change', handleFile);
-  qs('#sample-btn').addEventListener('click', ()=>parseCSV(sampleCSV));
-  qs('#theme-toggle').addEventListener('click', toggleTheme);
-  qs('#mode-select').addEventListener('change', (e)=>{state.mode=e.target.value; renderAll();});
-  qs('#fullscreen-btn').addEventListener('click', ()=>document.documentElement.requestFullscreen());
-  qsa('.filter-checkbox').forEach(cb=>cb.addEventListener('change', renderAll));
-  if(state.theme === 'dark') document.body.classList.add('dark');
-}
-
-/* Map init */
-function initMap(){
-  map = L.map('map', {minZoom:2, worldCopyJump:true}).setView([20,0],2);
-  tileLight = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom:19});
-  tileDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {maxZoom:19});
-  (state.theme === 'dark' ? tileDark : tileLight).addTo(map);
-  markerCluster = L.markerClusterGroup();
-  map.addLayer(markerCluster);
-}
-
-/* Theme toggle persisted */
-function toggleTheme(){
-  if(document.body.classList.contains('dark')){
-    document.body.classList.remove('dark');
-    state.theme='light';
-    try{ tileLight.addTo(map); tileDark.remove(); } catch(e){}
-  } else {
-    document.body.classList.add('dark');
-    state.theme='dark';
-    try{ tileDark.addTo(map); tileLight.remove(); } catch(e){}
-  }
-  localStorage.setItem('gvid-theme', state.theme);
-}
-
-/* File parsing (CSV/XLSX) */
-async function handleFile(e){
-  const file = e.target.files[0];
-  if(!file) return;
-  const name = file.name.toLowerCase();
-  showLoading(true,'Parsing file...');
-  if(name.endsWith('.csv')){
-    const text = await file.text();
-    parseCSV(text);
-  } else if(name.endsWith('.xlsx') || name.endsWith('.xls')){
-    const data = await file.arrayBuffer();
-    const wb = XLSX.read(data);
-    const first = wb.Sheets[wb.SheetNames[0]];
-    const csv = XLSX.utils.sheet_to_csv(first);
-    parseCSV(csv);
-  } else {
-    alert('Unsupported file type');
-  }
-}
-
-/* Minimal loading indicator (document title) */
-function showLoading(show, msg=''){
-  document.title = show ? `Loading... ${msg}` : 'Global Vendor Intelligence Dashboard';
-}
-
-/* Parse CSV and normalize rows */
-function parseCSV(csvText){
-  showLoading(true,'Parsing CSV');
-  const parsed = Papa.parse(csvText.trim(), {header:true, skipEmptyLines:true});
-  const raw = parsed.data;
-  if(!raw || raw.length===0){ showLoading(false); alert('No rows found'); return; }
-
-  const headers = Object.keys(raw[0]);
-  const mapping = {};
-  for(const h of headers){
-    const f = fuzzyFind(h);
-    if(f) mapping[f]=h;
-  }
-
-  if(!mapping.name){ mapping.name = headers.find(h=>/name|vendor|supplier/i.test(h)) || headers[0]; }
-  if(!mapping.lat || !mapping.lon){
-    const maybeLat = headers.find(h=>/lat|latitude/i.test(h));
-    const maybeLon = headers.find(h=>/lon|lng|longitude/i.test(h));
-    mapping.lat = mapping.lat || maybeLat;
-    mapping.lon = mapping.lon || maybeLon;
-  }
-
-  vendors = raw.map((r,idx)=>{
-    const v = {
-      id: idx,
-      name: r[mapping.name] || 'Unknown',
-      lat: parseFloat(r[mapping.lat]) || null,
-      lon: parseFloat(r[mapping.lon]) || null,
-      city: r[mapping.city]||'',
-      region: r[mapping.region]||'',
-      spend: parseFloat(r[mapping.spend]) || 0,
-      payments: parseFloat(r[mapping.payments]) || 0,
-      invoices: parseInt(r[mapping.invoices]) || 0,
-      paymentType: r[mapping.paymentType] || 'Unknown',
-      hasPO: (String(r[mapping.hasPO]||'').toLowerCase().startsWith('t')),
-      date: r[mapping.date] ? new Date(r[mapping.date]) : null,
-      raw: r
-    };
-    return v;
-  }).filter(v=>v.lat!==null && v.lon!==null);
-
-  showLoading(false);
-  if(vendors.length===0){ alert('No geolocated rows found. Ensure Lat/Lon columns are present.'); return; }
-
-  renderAll();
-}
-
-/* Render pipeline */
-function renderAll(){
-  updateKPIs();
-  renderMap();
-  renderCharts();
-}
-
-/* KPIs */
-function updateKPIs(){
-  const totalV = vendors.length;
-  const totalInvoices = vendors.reduce((s,v)=>s+ (v.invoices||0),0);
-  const totalSpend = vendors.reduce((s,v)=>s+ (v.spend||0),0)/1_000_000;
-  const totalPayments = vendors.reduce((s,v)=>s+ (v.payments||0),0)/1_000_000;
-  const percentPO = Math.round((vendors.filter(v=>v.hasPO).length/Math.max(1,totalV))*100);
-  animateValue('#total-vendors', totalV);
-  animateValue('#total-invoices', totalInvoices);
-  animateValue('#total-spend', Number(totalSpend.toFixed(2)));
-  animateValue('#total-payments', Number(totalPayments.toFixed(2)));
-  qs('#percent-po').textContent = percentPO + '%';
-}
-
-/* Simple counter animation */
-function animateValue(selector, val){
-  const el = qs(selector);
-  if(!el) return;
-  const start = Number(el.dataset.current) || 0;
-  const end = Number(val);
-  const dur = 400;
-  const startTime = performance.now();
-  function step(now){
-    const t = Math.min(1, (now-startTime)/dur);
-    const cur = Math.round((end-start)*t + start);
-    el.textContent = cur;
-    if(t<1) requestAnimationFrame(step);
-    else el.dataset.current = end;
-  }
-  requestAnimationFrame(step);
-}
-
-/* Map rendering + clustering */
-function renderMap(){
-  if(!map) initMap();
-  markerCluster.clearLayers();
-  markers = [];
-  vendors.forEach(v=>{
-    const m = L.circleMarker([v.lat,v.lon],{radius:8,fillOpacity:0.9,color:state.theme==='dark'?'#60a5fa':'#2563eb',weight:1});
-    m.bindTooltip(`<strong>${escapeHtml(v.name)}</strong><br>${escapeHtml(v.city)} — $${(v.spend||0).toLocaleString()}`);
-    m.on('click', ()=>openPortfolio(v));
-    m.vendorId = v.id;
-    markers.push(m);
-    markerCluster.addLayer(m);
-  });
-  try{
-    const group = new L.featureGroup(markers);
-    if(markers.length===1) map.setView(markers[0].getLatLng(),6);
-    else map.fitBounds(group.getBounds().pad(0.2));
-  } catch(e){}
-}
-
-/* Portfolio popup on click */
-function openPortfolio(v){
-  const html = `
-    <div style="min-width:240px">
-      <h3 style="margin:0 0 6px 0">${escapeHtml(v.name)}</h3>
-      <div><strong>City:</strong> ${escapeHtml(v.city)}</div>
-      <div><strong>Region:</strong> ${escapeHtml(v.region)}</div>
-      <div><strong>Total Spend:</strong> $${(v.spend||0).toLocaleString()}</div>
-      <div><strong>Total Payments:</strong> $${(v.payments||0).toLocaleString()}</div>
-      <div><strong>Invoices:</strong> ${v.invoices}</div>
-      <div><strong>Payment Type:</strong> ${escapeHtml(v.paymentType)}</div>
-    </div>
-  `;
-  L.popup({maxWidth:320}).setLatLng([v.lat,v.lon]).setContent(html).openOn(map);
-}
-
-/* Charts rendering (Chart.js) */
-function renderCharts(){
-  const topN = 10;
-  const sorted = vendors.slice().sort((a,b)=>b.spend - a.spend).slice(0,topN);
-  const labels = sorted.map(v=>v.name);
-  const data = sorted.map(v=>v.spend);
-
-  if(charts.bar){ charts.bar.data.labels = labels; charts.bar.data.datasets[0].data = data; charts.bar.update(); }
-  else{
-    const ctx = qs('#barChart').getContext('2d');
-    charts.bar = new Chart(ctx, {type:'bar',data:{labels, datasets:[{label:'Spend',data,backgroundColor:labels.map(()=>undefined)}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},onHover:barHover}});
-  }
-
-  const byPayment = vendors.reduce((acc,v)=>{acc[v.paymentType] = (acc[v.paymentType]||0)+v.spend; return acc;},{});
-  const pLabels = Object.keys(byPayment);
-  const pData = pLabels.map(k=>byPayment[k]);
-  if(charts.pie){ charts.pie.data.labels = pLabels; charts.pie.data.datasets[0].data = pData; charts.pie.update(); }
-  else{
-    const ctx2 = qs('#pieChart').getContext('2d');
-    charts.pie = new Chart(ctx2,{type:'doughnut',data:{labels:pLabels,datasets:[{data:pData}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}},onHover:pieHover}});
-  }
-
-  const hasDates = vendors.some(v=>v.date);
-  if(hasDates){
-    const monthly = {};
-    vendors.forEach(v=>{
-      if(!v.date) return;
-      const m = `${v.date.getFullYear()}-${(v.date.getMonth()+1).toString().padStart(2,'0')}`;
-      monthly[m] = (monthly[m]||0) + (v.payments||0);
-    });
-    const months = Object.keys(monthly).sort();
-    const payments = months.map(m=>monthly[m]);
-    if(charts.line){ charts.line.data.labels = months; charts.line.data.datasets[0].data = payments; charts.line.update(); }
-    else{
-      const ctx3 = qs('#lineChart').getContext('2d');
-      charts.line = new Chart(ctx3,{type:'line',data:{labels:months,datasets:[{label:'Payments',data:payments,fill:false, tension:0.3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},onHover:lineHover}});
+  function fuzzyFind(header) {
+    if(!header) return null;
+    const key = String(header).trim().toLowerCase().replace(/\s|\.|_/g,'');
+    for(const k of Object.keys(colMap)) {
+      if (colMap[k].includes(key)) return k;
     }
-  } else {
-    if(charts.line){ charts.line.data.labels = []; charts.line.data.datasets[0].data = []; charts.line.update(); }
+    // fallback heuristic
+    if(/lat|lng|lon|longitude|latitude/.test(key)) return key.match(/lat/) ? 'lat' : 'lon';
+    return null;
   }
-}
 
-/* Map highlighting helpers */
-function highlightVendorsByNames(names){
-  markers.forEach(m=>m.setStyle({radius:8,opacity:1,fillOpacity:0.9}));
-  const nameSet = new Set(names);
-  markers.forEach(m=>{
-    const v = vendors.find(x=>x.id===m.vendorId);
-    if(v && nameSet.has(v.name)) m.setStyle({radius:14,fillOpacity:1});
+  // UI wiring
+  uploadBtn.addEventListener('click', ()=> uploadModal.style.display = 'flex');
+  closeModal && closeModal.addEventListener('click', ()=> uploadModal.style.display = 'none');
+  fileInput.addEventListener('change', handleFileInput);
+  loadSelectedSheets && loadSelectedSheets.addEventListener('click', loadSelectedSheetData);
+  downloadChartBtn && downloadChartBtn.addEventListener('click', ()=> {
+    if (!mainChart) return alert('Chart not ready');
+    const a = document.createElement('a'); a.href = mainChart.toBase64Image(); a.download = 'chart.png'; a.click();
   });
-}
 
-/* Chart hover handlers */
-function barHover(evt, elems){
-  if(!elems || elems.length===0){
-    markers.forEach(m=>m.setStyle({radius:8,fillOpacity:0.9}));
-    return;
-  }
-  const idx = elems[0].index;
-  const label = charts.bar.data.labels[idx];
-  const names = vendors.filter(v=>v.name===label).map(v=>v.name);
-  highlightVendorsByNames(names);
-}
+  themeToggle && themeToggle.addEventListener('click', ()=>{
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    document.body.classList.toggle('theme-dark', currentTheme==='dark');
+    localStorage.setItem('dv-theme', currentTheme);
+  });
 
-function pieHover(evt, elems){
-  if(!elems || elems.length===0){ renderMap(); return; }
-  const idx = elems[0].index;
-  const label = charts.pie.data.labels[idx];
-  const names = vendors.filter(v=>v.paymentType===label).map(v=>v.name);
-  highlightVendorsByNames(names);
-}
+  chartTypeSel && chartTypeSel.addEventListener('change', renderMainChart);
+  topNInput && topNInput.addEventListener('change', renderMainChart);
 
-function lineHover(evt, elems){
-  if(!elems || elems.length===0) return;
-  const idx = elems[0].index;
-  const month = charts.line.data.labels[idx];
-  const names = vendors.filter(v=>v.date && `${v.date.getFullYear()}-${(v.date.getMonth()+1).toString().padStart(2,'0')}`===month).map(v=>v.name);
-  highlightVendorsByNames(names);
-}
-
-/* Escape user-provided text for HTML insertion */
-function escapeHtml(str){
-  if(!str) return '';
-  return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[s]));
-}
-
-/* Chart export (PNG) */
-function exportChartAsImage(chart, filename='chart.png'){
-  if(!chart) return;
-  const link = document.createElement('a');
-  link.href = chart.toBase64Image();
-  link.download = filename;
-  link.click();
-}
-
-/* Map export (basic SVG -> PNG attempt) */
-async function exportMapAsImage(filename='map.png'){
-  try{
-    const svg = document.querySelector('#map svg');
-    if(svg){
-      const serializer = new XMLSerializer();
-      const svgStr = serializer.serializeToString(svg);
-      const canvas = document.createElement('canvas');
-      const bbox = svg.getBBox();
-      canvas.width = Math.max(800, bbox.width);
-      canvas.height = Math.max(400, bbox.height);
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-      const svgBlob = new Blob([svgStr], {type: 'image/svg+xml;charset=utf-8'});
-      const url = URL.createObjectURL(svgBlob);
-      await new Promise((res,rej)=>{ img.onload = ()=>res(); img.onerror = rej; img.src = url; });
-      ctx.drawImage(img,0,0);
-      const link = document.createElement('a'); link.href = canvas.toDataURL('image/png'); link.download = filename; link.click();
-      URL.revokeObjectURL(url);
+  // File handling
+  async function handleFileInput(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    resetUIForUpload();
+    const name = file.name.toLowerCase();
+    if(name.endsWith('.csv')) {
+      const text = await file.text();
+      const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
+      workbookSheets = [{ name: 'CSV', data: parsed.data }];
+      populateSheetSelect();
+    } else if(name.endsWith('.xlsx') || name.endsWith('.xls')) {
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array'});
+      workbookSheets = wb.SheetNames.map(sn => {
+        const ws = wb.Sheets[sn];
+        return { name: sn, data: XLSX.utils.sheet_to_json(ws, {defval: ''}) };
+      });
+      populateSheetSelect();
     } else {
-      alert('Map snapshot not supported in this browser.');
+      alert('Unsupported file type. Please upload CSV or Excel (.xlsx/.xls).');
     }
-  } catch(e){ console.error(e); alert('Failed to export map.'); }
-}
+  }
 
-/* Init on DOM ready */
-window.addEventListener('DOMContentLoaded', ()=>{
-  initUI();
-  initMap();
-  document.addEventListener('keydown', (e)=>{
-    if(e.ctrlKey && e.key === 'e'){ e.preventDefault(); if(charts.bar) exportChartAsImage(charts.bar,'bar-chart.png'); }
-  });
-  // show sample dataset by default so the UI is visible
-  parseCSV(sampleCSV);
-});
+  function resetUIForUpload() {
+    // show sheet selector container inside modal
+    $('#sheetSelector').style.display = 'none';
+    $('#uploadProgress').style.display = 'none';
+    // clear previous
+    sheetSelect.innerHTML = '';
+  }
+
+  function populateSheetSelect() {
+    if(!sheetSelect) return;
+    sheetSelect.innerHTML = '';
+    workbookSheets.forEach((s, idx) => {
+      const opt = document.createElement('option');
+      opt.value = idx; opt.textContent = s.name;
+      sheetSelect.appendChild(opt);
+    });
+    // show sheets UI in modal
+    $('#sheetSelector').style.display = 'block';
+    uploadModal.style.display = 'flex';
+  }
+
+  function loadSelectedSheetData(){
+    const selIdx = Number(sheetSelect.value || 0);
+    const sheet = workbookSheets[selIdx];
+    if(!sheet) { alert('No sheet selected'); return; }
+    currentRows = normalizeRows(sheet.data);
+    uploadModal.style.display = 'none';
+    postLoadUI();
+  }
+
+  // Normalize rows: attempt to map columns
+  function normalizeRows(raw) {
+    if(!raw || !raw.length) return [];
+    const headers = Object.keys(raw[0]);
+    // build mapping
+    const mapping = {};
+    headers.forEach(h => {
+      const f = fuzzyFind(h);
+      if(f) mapping[f] = h;
+    });
+    // fallback picks
+    if(!mapping.name) mapping.name = headers.find(h=>/name|vendor|supplier/i.test(h)) || headers[0];
+    if(!mapping.lat) mapping.lat = headers.find(h=>/lat|latitude/i.test(h));
+    if(!mapping.lon) mapping.lon = headers.find(h=>/lon|lng|longitude/i.test(h));
+
+    // sanitize rows
+    const out = raw.map((r, i) => {
+      const lat = Number(String(r[mapping.lat] ?? '').replace(/,/g,'')) || null;
+      const lon = Number(String(r[mapping.lon] ?? '').replace(/,/g,'')) || null;
+      const dateRaw = r[mapping.date] ?? r['InvoiceDate'] ?? r['Date'] ?? null;
+      const parsedDate = dateRaw ? new Date(dateRaw) : null;
+      return {
+        __idx: i,
+        name: String(r[mapping.name] ?? 'Unknown'),
+        lat,
+        lon,
+        city: String(r[mapping.city] ?? ''),
+        region: String(r[mapping.region] ?? ''),
+        spend: Number(String(r[mapping.spend] ?? 0).replace(/[,₹$]/g,'')) || 0,
+        payments: Number(String(r[mapping.payments] ?? 0).replace(/[,₹$]/g,'')) || 0,
+        invoices: Number(String(r[mapping.invoices] ?? 0)) || 0,
+        paymentType: String(r[mapping.paymentType] ?? r['PaymentType'] ?? 'Unknown'),
+        hasPO: String(r[mapping.hasPO] ?? '').toLowerCase().startsWith('t') || String(r[mapping.hasPO]??'').toLowerCase()==='yes',
+        date: isNaN(parsedDate) ? null : parsedDate,
+        raw: r
+      };
+    });
+    // filter out rows without lat/lon (inform user)
+    const geocount = out.filter(r => r.lat !== null && r.lon !== null).length;
+    if(geocount === 0) {
+      mapStatus.textContent = 'No geolocation found';
+    } else {
+      mapStatus.textContent = `${geocount} geolocated rows`;
+    }
+    return out;
+  }
+
+  // After load: show UI sections, KPIs, charts, map
+  function postLoadUI() {
+    // hide welcome, show grids
+    welcomeScreen.style.display = 'none';
+    chartsGrid.style.display = 'grid';
+    controlsPanel.style.display = 'flex';
+    quickStats.style.display = 'block';
+    filtersSection.style.display = 'block';
+    exportSection.style.display = 'block';
+    tableSection.style.display = 'block';
+
+    rowCountEl.textContent = currentRows.length;
+    colCountEl.textContent = Object.keys(currentRows[0]?.raw ?? {}).length || 0;
+
+    buildFilters();
+    renderKPIs();
+    renderMainChart();
+    renderMap();
+    renderDataTable();
+  }
+
+  // KPIs
+  function renderKPIs() {
+    const totalVendors = new Set(currentRows.map(r=>r.name)).size;
+    const totalInvoices = currentRows.reduce((s,r)=>s + (r.invoices||0), 0);
+    const totalSpendM = currentRows.reduce((s,r)=>s + (r.spend||0), 0)/1_000_000;
+    // Write into quickStats area
+    $('#dashboardTitle').textContent = `Dataset: ${workbookSheets[sheetSelect.value||0].name}`;
+    // Quick stat cards are already wired via rowCount/colCount; create small header KPIs
+    // We'll add simple document-level elements:
+    let kpiWrap = $('#kpiWrap');
+    if(!kpiWrap) {
+      kpiWrap = document.createElement('div'); kpiWrap.id = 'kpiWrap';
+      kpiWrap.style.display = 'flex'; kpiWrap.style.gap='12px'; kpiWrap.style.margin='10px 0';
+      $('.header-left').appendChild(kpiWrap);
+    }
+    kpiWrap.innerHTML = `
+      <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.06)">
+        <div style="font-size:12px;color:#666">Vendors</div>
+        <div style="font-weight:700">${totalVendors}</div>
+      </div>
+      <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.06)">
+        <div style="font-size:12px;color:#666">Invoices</div>
+        <div style="font-weight:700">${totalInvoices}</div>
+      </div>
+      <div style="background:#fff;padding:10px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.06)">
+        <div style="font-size:12px;color:#666">Total Spend ($M)</div>
+        <div style="font-weight:700">${totalSpendM.toFixed(2)}</div>
+      </div>
+    `;
+  }
+
+  // Build simple filters (region / paymentType)
+  function buildFilters() {
+    filterContainer.innerHTML = '';
+    const regions = Array.from(new Set(currentRows.map(r=>r.region||'Unknown'))).sort();
+    const ptypes = Array.from(new Set(currentRows.map(r=>r.paymentType||'Unknown'))).sort();
+
+    const regWrap = document.createElement('div'); regWrap.className='filter-block';
+    regWrap.innerHTML = `<div style="font-weight:600;margin-bottom:6px">Region</div>`;
+    regions.forEach(r => {
+      const id = 'f_reg_' + r.replace(/\s/g,'_');
+      const row = document.createElement('div');
+      row.innerHTML = `<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked data-filter="region" value="${r}"> ${r}</label>`;
+      regWrap.appendChild(row);
+    });
+    filterContainer.appendChild(regWrap);
+
+    const payWrap = document.createElement('div'); payWrap.className='filter-block';
+    payWrap.innerHTML = `<div style="font-weight:600;margin-bottom:6px">Payment Type</div>`;
+    ptypes.forEach(p => {
+      const row = document.createElement('div');
+      row.innerHTML = `<label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked data-filter="paymentType" value="${p}"> ${p}</label>`;
+      payWrap.appendChild(row);
+    });
+    filterContainer.appendChild(payWrap);
+
+    // hook filters
+    filterContainer.querySelectorAll('input[type=checkbox]').forEach(cb => cb.addEventListener('change', ()=>{
+      applyFiltersAndRefresh();
+    }));
+  }
+
+  function getActiveFilters() {
+    const active = { region: null, paymentType: null };
+    const regionChecks = Array.from(filterContainer.querySelectorAll('input[data-filter="region"]'));
+    const activeRegions = regionChecks.filter(c=>c.checked).map(c=>c.value);
+    const payChecks = Array.from(filterContainer.querySelectorAll('input[data-filter="paymentType"]'));
+    const activePays = payChecks.filter(c=>c.checked).map(c=>c.value);
+    active.region = activeRegions.length === 0 ? null : activeRegions;
+    active.paymentType = activePays.length === 0 ? null : activePays;
+    return active;
+  }
+
+  function applyFiltersAndRefresh() {
+    const f = getActiveFilters();
+    // filter rows
+    const filtered = currentRows.filter(r => {
+      if(f.region && !f.region.includes(r.region)) return false;
+      if(f.paymentType && !f.paymentType.includes(r.paymentType)) return false;
+      return true;
+    });
+    // use filtered for charts/map/table
+    renderMainChart(filtered);
+    renderMap(filtered);
+    renderDataTable(filtered);
+  }
+
+  // Render main chart: auto detection
+  function renderMainChart(rows = currentRows) {
+    if(!rows) rows = currentRows;
+    if(!rows || rows.length===0) {
+      chartTitle.textContent = 'No data';
+      return;
+    }
+    const type = chartTypeSel.value === 'auto' ? autoDetectChartType(rows) : chartTypeSel.value;
+    chartTitle.textContent = type === 'bar' ? 'Top Vendors by Spend' : type === 'line' ? 'Payments Over Time' : 'Distribution';
+
+    const ctx = mainChartCanvas.getContext('2d');
+    // build datasets for common types
+    if(mainChart) { mainChart.destroy(); mainChart = null; }
+
+    if(type === 'bar') {
+      // top N vendors by spend
+      const topN = Math.max(5, Number(topNInput.value||10));
+      const byVendor = {};
+      rows.forEach(r => byVendor[r.name] = (byVendor[r.name] || 0) + (r.spend||0));
+      const arr = Object.entries(byVendor).map(([k,v])=>({k,v})).sort((a,b)=>b.v-a.v).slice(0, topN);
+      mainChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: arr.map(a=>a.k), datasets: [{ label: 'Spend', data: arr.map(a=>a.v) }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+      });
+      // hover sync
+      mainChart.canvas.addEventListener('mousemove', (ev)=> {
+        const points = mainChart.getElementsAtEventForMode(ev, 'nearest', { intersect: true }, false);
+        if(points && points.length) {
+          const idx = points[0].index;
+          const vendorName = mainChart.data.labels[idx];
+          highlightMapForVendor(vendorName);
+        } else {
+          renderMap(rows);
+        }
+      });
+    } else if(type === 'line') {
+      // payments over time (monthly)
+      const monthly = {};
+      rows.forEach(r => {
+        if(!r.date) return;
+        const m = `${r.date.getFullYear()}-${String(r.date.getMonth()+1).padStart(2,'0')}`;
+        monthly[m] = (monthly[m]||0) + (r.payments||0);
+      });
+      const months = Object.keys(monthly).sort();
+      mainChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels: months, datasets: [{ label: 'Payments', data: months.map(m=>monthly[m]) }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}} }
+      });
+      mainChart.canvas.addEventListener('mousemove', (ev)=> {
+        const pts = mainChart.getElementsAtEventForMode(ev, 'nearest', { intersect:true }, false);
+        if(pts && pts.length) {
+          const idx = pts[0].index; const month = mainChart.data.labels[idx];
+          highlightMapForMonth(month);
+        } else renderMap(rows);
+      });
+    } else {
+      // default: pie by paymentType
+      const byType = {};
+      rows.forEach(r => byType[r.paymentType] = (byType[r.paymentType]||0) + (r.spend||0));
+      const labels = Object.keys(byType);
+      const data = labels.map(l=>byType[l]);
+      mainChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}} }
+      });
+      mainChart.canvas.addEventListener('mousemove', (ev)=> {
+        const p = mainChart.getElementsAtEventForMode(ev, 'nearest', { intersect:true }, false);
+        if(p && p.length) {
+          const idx = p[0].index; const label = mainChart.data.labels[idx];
+          highlightMapByPaymentType(label);
+        } else renderMap(rows);
+      });
+    }
+  }
+
+  function autoDetectChartType(rows) {
+    // if there are dates -> line, else if many categories vendor names -> bar, else pie
+    const hasDates = rows.some(r => r.date);
+    if(hasDates) return 'line';
+    const uniqueVendors = new Set(rows.map(r=>r.name)).size;
+    if(uniqueVendors > Math.max(8, rows.length * 0.2)) return 'bar';
+    return 'pie';
+  }
+
+  // Map rendering (Leaflet)
+  function renderMap(rows = currentRows) {
+    if(!rows) rows = currentRows;
+    if(!indiaMapEl) return;
+    if(!map) {
+      map = L.map(indiaMapEl, {minZoom:2}).setView([22.0,78.0], 3);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:19 }).addTo(map);
+      markersLayer = L.markerClusterGroup();
+      map.addLayer(markersLayer);
+    }
+    markersLayer.clearLayers();
+    rows.forEach(r => {
+      if(r.lat === null || r.lon === null) return;
+      const marker = L.circleMarker([r.lat, r.lon], { radius:6, color:'#2563eb', fillOpacity:0.9 });
+      marker.bindTooltip(`<strong>${escapeHtml(r.name)}</strong><br>${escapeHtml(r.city)} • ${escapeHtml(r.region)}<br>Spend: $${(r.spend||0).toLocaleString()}`);
+      marker.on('click', ()=> {
+        L.popup({maxWidth:300})
+          .setLatLng([r.lat,r.lon])
+          .setContent(`<div style="min-width:220px">
+            <h4 style="margin:0 0 6px 0">${escapeHtml(r.name)}</h4>
+            <div><strong>City:</strong> ${escapeHtml(r.city)}</div>
+            <div><strong>Region:</strong> ${escapeHtml(r.region)}</div>
+            <div><strong>Spend:</strong> $${(r.spend||0).toLocaleString()}</div>
+            <div><strong>Payment:</strong> ${escapeHtml(r.paymentType)}</div>
+            <div><strong>Invoices:</strong> ${r.invoices}</div>
+          </div>`).openOn(map);
+      });
+      marker.__vendorName = r.name;
+      marker.__date = r.date ? `${r.date.getFullYear()}-${String(r.date.getMonth()+1).padStart(2,'0')}` : null;
+      markersLayer.addLayer(marker);
+    });
+    // fit map to markers if any
+    try {
+      const all = markersLayer.getLayers();
+      if(all.length === 1) map.setView(all[0].getLatLng(), 6);
+      else if(all.length > 1) {
+        const group = L.featureGroup(all);
+        map.fitBounds(group.getBounds().pad(0.2));
+      }
+    } catch (e) { console.warn(e); }
+  }
+
+  // Map highlight helpers
+  function highlightMapForVendor(name) {
+    markersLayer.getLayers().forEach(m => {
+      if(m.__vendorName === name) m.setStyle({ radius: 12, color:'#ff7600' });
+      else m.setStyle({ radius:6, color:'#2563eb' });
+    });
+  }
+  function highlightMapByPaymentType(pt) {
+    markersLayer.getLayers().forEach(m => {
+      const row = currentRows.find(r => r.name === m.__vendorName);
+      if(row && row.paymentType === pt) m.setStyle({ radius: 12, color:'#ff7600' });
+      else m.setStyle({ radius:6, color:'#2563eb' });
+    });
+  }
+  function highlightMapForMonth(month) {
+    markersLayer.getLayers().forEach(m => {
+      if(m.__date === month) m.setStyle({ radius:12, color:'#ff7600' });
+      else m.setStyle({ radius:6, color:'#2563eb' });
+    });
+  }
+
+  // Table rendering (simple)
+  function renderDataTable(rows = currentRows) {
+    if(!rows) rows = currentRows;
+    dataTableEl.innerHTML = '';
+    if(!rows || rows.length === 0) { dataTableEl.innerHTML = '<div>No data</div>'; return; }
+    const table = document.createElement('table'); table.style.width='100%'; table.style.borderCollapse='collapse';
+    table.className = 'dv-table';
+    const thead = document.createElement('thead'); const tbody = document.createElement('tbody');
+    const cols = Object.keys(rows[0].raw);
+    const trh = document.createElement('tr');
+    cols.forEach(c => { const th = document.createElement('th'); th.textContent = c; trh.appendChild(th); });
+    thead.appendChild(trh);
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      cols.forEach(c => {
+        const td = document.createElement('td'); td.textContent = String(r.raw[c] ?? ''); td.style.padding='6px 8px'; tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(thead); table.appendChild(tbody);
+    dataTableEl.appendChild(table);
+  }
+
+  // Utilities
+  function escapeHtml(s) { if(!s) return ''; return String(s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[ch])); }
+
+  // Initialize small sample if no upload after 300ms so user sees layout
+  setTimeout(()=>{
+    if(welcomeScreen) {
+      // nothing automatic here: user will upload; but you can pre-load sample if desired
+    }
+  },300);
+
+})();
