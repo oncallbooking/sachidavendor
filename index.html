@@ -3,73 +3,107 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Vendor Dashboard — Map & Chart</title>
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2pQ1LQkq6XGkQ5tG2Nw+2q8G2R8N0p2kF6hRPMc=" crossorigin=""/>
-  <!-- Font Awesome for icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="sha512-pfV8zJkJ..." crossorigin="anonymous" referrerpolicy="no-referrer" />
-  <!-- App CSS -->
+  <title>Global Vendor Intelligence Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
   <link rel="stylesheet" href="style.css" />
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-Vj3Gk...=" crossorigin=""></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/papaparse/5.4.1/papaparse.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script defer src="script.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 </head>
 <body>
-  <header class="site-header">
-    <div class="brand">
-      <img src="logo.jpg" alt="Logo" class="logo" />
-      <div class="brand-info">
-        <h1>Vendor Analytics</h1>
-        <p class="muted">Interactive map + charts dashboard</p>
-      </div>
-    </div>
-    <div class="header-actions">
-      <button id="fullscreenChart" class="btn subtle" title="Toggle Chart Fullscreen">
-        <i class="fa fa-expand"></i> Fullscreen
-      </button>
-      <label class="btn file-btn">
-        <input type="file" id="fileInput" accept=".csv" />
-        Upload CSV
-      </label>
-    </div>
-  </header>
-
-  <main class="main-grid">
-    <section class="chart-card chart-primary">
-      <div class="chart-head">
-        <div>
-          <h2 id="chartTitle">Sales by Vendor</h2>
-          <p class="muted small">Hover markers to preview vendor info. Click to lock popup & highlight chart.</p>
+  <div id="app" class="app">
+    <header class="header">
+      <div class="logo-wrap">
+        <div class="logo">📊</div>
+        <div class="title">
+          <div class="app-title">Global Vendor Intelligence Dashboard</div>
+          <div class="app-sub">Interactive Vendor Analytics & Visualization</div>
         </div>
       </div>
 
-      <div class="chart-body">
-        <canvas id="mainChart" aria-label="Sales chart" role="img"></canvas>
+      <div class="controls">
+        <label class="upload-btn">
+          <input id="file-input" type="file" accept=".csv,.xlsx" />
+          <i class="fa fa-upload"></i> Upload
+        </label>
+        <button id="sample-btn" class="btn">Load Sample</button>
+        <button id="fullscreen-btn" class="btn" title="Toggle Fullscreen"><i class="fa fa-expand"></i></button>
+        <button id="theme-toggle" class="btn" title="Toggle Theme"><i class="fa fa-moon"></i></button>
       </div>
-      <div class="chart-footer">
-        <div class="legend">
-          <span class="muted small">Tip: upload CSV with columns <code>name,lat,lon,sales</code></span>
+    </header>
+
+    <main class="main">
+      <section class="left-panel">
+        <div class="kpi-row">
+          <div class="kpi card" id="kpi-vendors">
+            <div class="kpi-title">Total Vendors</div>
+            <div class="kpi-value" id="total-vendors">0</div>
+          </div>
+          <div class="kpi card" id="kpi-invoices">
+            <div class="kpi-title">Total Invoices</div>
+            <div class="kpi-value" id="total-invoices">0</div>
+          </div>
+          <div class="kpi card" id="kpi-spend">
+            <div class="kpi-title">Total Spend ($M)</div>
+            <div class="kpi-value" id="total-spend">0.00</div>
+          </div>
+          <div class="kpi card" id="kpi-payments">
+            <div class="kpi-title">Total Payments ($M)</div>
+            <div class="kpi-value" id="total-payments">0.00</div>
+          </div>
+          <div class="kpi card" id="kpi-po">
+            <div class="kpi-title">% Invoices w/ PO</div>
+            <div class="kpi-value" id="percent-po">0%</div>
+          </div>
         </div>
-      </div>
-    </section>
 
-    <aside class="map-card">
-      <div class="map-head">
-        <h3>Vendor Map</h3>
-        <p class="muted small">Hover to view quick info. Click to lock details.</p>
-      </div>
-      <div id="map" class="map-canvas"></div>
-    </aside>
-  </main>
+        <div class="controls-panel card">
+          <div class="control-row">
+            <label><input type="checkbox" class="filter-checkbox" data-field="region" checked /> Region</label>
+            <label><input type="checkbox" class="filter-checkbox" data-field="city" checked /> City</label>
+            <label><input type="checkbox" class="filter-checkbox" data-field="paymentType" checked /> Payment Type</label>
+          </div>
 
-  <footer class="site-footer">
-    <div>Built with <span class="accent">Leaflet</span> &amp; <span class="accent">Chart.js</span> • Professional dashboard template</div>
-  </footer>
+          <div class="mode-row">
+            <label>Mode:</label>
+            <select id="mode-select">
+              <option value="auto">Auto</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+        </div>
 
-  <!-- App script -->
-  <script src="script.js"></script>
+        <div class="charts card">
+          <div class="chart-row">
+            <div class="chart-wrap">
+              <canvas id="barChart" height="240"></canvas>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="pieChart" height="240"></canvas>
+            </div>
+          </div>
+          <div class="chart-row">
+            <div class="chart-wrap fullwidth">
+              <canvas id="lineChart" height="200"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="right-panel card">
+        <div id="map" class="map"></div>
+      </aside>
+    </main>
+
+    <footer class="footer">Built with Leaflet.js &amp; Chart.js</footer>
+  </div>
 </body>
 </html>
