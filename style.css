@@ -1214,3 +1214,58 @@ h1, h2, h3, h4, h5, h6 {
 .d-none { display: none; }
 .d-block { display: block; }
 .d-flex { display: flex; }
+
+/* Charts grid: side-by-side on large screens, stacked on small */
+.charts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* chart left, map right */
+    gap: 20px;
+    margin-top: 20px;
+}
+
+@media (max-width: 992px) {
+    .charts-grid {
+        grid-template-columns: 1fr; /* stack vertically on smaller screens */
+    }
+}
+
+/* Chart and map cards */
+.chart-card {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.chart-body {
+    position: relative;
+}
+
+/* Table section below charts */
+.table-section {
+    margin-top: 30px;
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    padding: 20px;
+}
+
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.table-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
