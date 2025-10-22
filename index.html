@@ -1,98 +1,257 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <title>Sachida's RDSO Vendor Map - Interactive Railway Vendor Directory</title>
-    <meta name="description" content="Explore RDSO approved rail...pliers for rail components, fasteners, and railway materials." />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="" crossorigin="" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Sachidas Vendors Dashboard — Enhanced</title>
 
-    <!-- New CSS for Excel uploader, charts, and modal -->
-    <link rel="stylesheet" href="./style.css" />
-  </head>
-  <body>
-    <!-- Existing app root (React/Vite) -->
-    <div id="root"></div>
+  <!-- Tailwind CSS (Play CDN for simplicity) -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
-    <!-- NEW: UI for Excel upload + charts (keeps map/vendor UI intact) -->
-    <aside id="excel-sidebar" class="excel-sidebar">
-      <button id="open-uploader-btn" class="sidebar-btn">📊 Upload Excel Data</button>
-    </aside>
+  <!-- Leaflet CSS & JS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-sA+FQ3wS2sQw6r2xQRSKqzq0K6Y0tqvV1VnYv+3M0vM="
+    crossorigin=""
+  />
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-o9N1j7rL1f9f8Z6i1F2Jb9h7xgKj2B1wq6e5qK0VQ6s="
+    crossorigin=""
+  ></script>
 
-    <!-- Modal / Panel -->
-    <div id="excel-modal" class="excel-modal" aria-hidden="true">
-      <div class="excel-modal-content">
-        <header class="modal-header">
-          <h2>Upload Excel / CSV</h2>
-          <div class="modal-controls">
-            <button id="print-dashboard" title="Print dashboard">🖨️ Print</button>
-            <button id="close-uploader" aria-label="Close modal">✖</button>
-          </div>
-        </header>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-        <section class="upload-section">
-          <div id="drop-area" class="drop-area">
-            <p>Drag & drop a <strong>.xlsx</strong> or <strong>.csv</strong> file here — or</p>
-            <input id="file-input" type="file" accept=".xlsx,.xls,.csv" />
-            <label for="file-input" class="file-label">Choose a file</label>
-            <small id="upload-help">SheetJS will parse the file in the browser; files are not uploaded to a server.</small>
-          </div>
+  <!-- SheetJS (xlsx) -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/shim.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
-          <div class="controls-row">
-            <label>
-              Chart type:
-              <select id="chart-type-select">
-                <option value="auto">Auto-detect</option>
-                <option value="bar">Bar</option>
-                <option value="line">Line</option>
-                <option value="pie">Pie</option>
-                <option value="bubble">Bubble</option>
-              </select>
-            </label>
+  <!-- Simple favicon -->
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=" />
 
-            <label>
-              Max preview rows:
-              <input id="preview-rows" type="number" min="5" max="100" value="10" />
-            </label>
+  <!-- App styles -->
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body class="bg-slate-50 text-slate-800">
 
-            <button id="generate-charts" class="primary">Generate Charts</button>
-          </div>
-        </section>
-
-        <section id="chart-area" class="chart-area" aria-live="polite">
-          <!-- Charts will be created here -->
-          <div id="chart-controls" class="chart-controls" style="display:none;">
-            <button id="download-all" title="Download all charts as PNG">⬇️ Download All Charts</button>
-          </div>
-
-          <div id="charts-grid" class="charts-grid"></div>
-
-          <details id="data-preview" class="data-preview">
-            <summary>Preview Data (first rows)</summary>
-            <div id="preview-table-wrap" class="preview-table-wrap"></div>
-          </details>
-        </section>
+  <!-- Top bar -->
+  <header class="bg-white shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-semibold">Sachidas Vendors Dashboard</h1>
+        <span class="text-sm text-slate-500">Vendor visualization & uploaded-data analytics</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="helpBtn" class="px-3 py-1 text-sm rounded-md bg-indigo-50 text-indigo-700 hover:bg-indigo-100">Help</button>
+        <a class="text-xs text-slate-400" href="#" target="_blank" rel="noopener noreferrer">v1.0</a>
       </div>
     </div>
+  </header>
 
-    <!-- Leaflet and other libs used by the existing app -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <!-- Main layout -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-    <!-- React app entry (existing) -->
-    <script type="module" src="/src/main.tsx"></script>
+    <!-- Sidebar -->
+    <aside class="lg:col-span-3 bg-white rounded-xl p-4 shadow-sm h-fit sticky top-6">
+      <nav class="space-y-2">
+        <button id="uploadBtn" class="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-amber-50 hover:bg-amber-100 text-slate-800 text-sm">📊 Upload Excel Data</button>
+        <button id="showMapBtn" class="w-full text-left px-3 py-2 rounded-md hover:bg-slate-50 text-sm">🗺️ Show Map</button>
+        <button id="filtersToggle" class="w-full text-left px-3 py-2 rounded-md hover:bg-slate-50 text-sm">🔎 Vendor Filters</button>
+        <button id="uploadedTabBtn" class="w-full text-left px-3 py-2 rounded-md hover:bg-slate-50 text-sm">📁 Uploaded Data</button>
+      </nav>
 
-    <!-- CDNs needed for the new feature -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+      <hr class="my-4" />
 
-    <!-- New script to handle uploads, parsing, charting -->
-    <script src="./script.js" defer></script>
-  </body>
+      <!-- Filters (basic sample; keep functional placeholder) -->
+      <div id="filtersPanel">
+        <h3 class="text-sm font-medium mb-2">Vendor Filters</h3>
+        <div class="space-y-3 text-sm">
+          <div>
+            <label class="block text-xs text-slate-500">Category</label>
+            <select id="categoryFilter" class="w-full mt-1 rounded-md border px-2 py-1">
+              <option value="">All</option>
+              <option>Food</option>
+              <option>Retail</option>
+              <option>Services</option>
+              <option>Pharmacy</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs text-slate-500">State</label>
+            <select id="stateFilter" class="w-full mt-1 rounded-md border px-2 py-1">
+              <option value="">All</option>
+              <option>Maharashtra</option>
+              <option>Delhi</option>
+              <option>Karnataka</option>
+              <option>Tamil Nadu</option>
+            </select>
+          </div>
+
+          <button id="applyFilters" class="w-full bg-indigo-600 text-white py-1.5 rounded-md text-sm hover:bg-indigo-700">Apply</button>
+        </div>
+      </div>
+
+      <hr class="my-4" />
+
+      <div class="text-xs text-slate-500">
+        Built for GitHub Pages. No backend. Uses client-side parsing & Chart.js.
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="lg:col-span-9 space-y-6">
+
+      <!-- Map & basic analytics -->
+      <section class="bg-white rounded-xl p-4 shadow-sm">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2">
+            <div class="h-96 rounded-md overflow-hidden border" id="map"></div>
+          </div>
+
+          <div class="space-y-4">
+            <div class="p-3 border rounded-md">
+              <h3 class="text-sm font-medium">Summary</h3>
+              <div class="mt-2 text-sm text-slate-600">
+                <p id="summaryText">Showing 120 vendors across India (sample dataset).</p>
+                <p class="mt-2"><strong>Selected:</strong> <span id="selectedCount">0</span> vendors</p>
+              </div>
+            </div>
+
+            <div class="p-3 border rounded-md">
+              <h3 class="text-sm font-medium">Analytics</h3>
+              <div id="analyticsCharts" class="mt-3">
+                <!-- small sample chart (vendors by category) -->
+                <canvas id="sampleChart" width="300" height="180"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Uploaded Data tab & Chart area -->
+      <section id="uploadedDataSection" class="bg-white rounded-xl p-4 shadow-sm hidden">
+        <div class="flex items-center justify-between">
+          <h2 class="text-md font-semibold">Uploaded Data</h2>
+          <div class="flex items-center gap-2">
+            <label class="text-sm text-slate-500">Choose chart</label>
+            <select id="chartTypeSelect" class="rounded-md border px-2 py-1 text-sm">
+              <option value="auto">Auto-detect</option>
+              <option value="pie">Pie</option>
+              <option value="bar">Bar</option>
+              <option value="line">Line</option>
+              <option value="bubble">Bubble</option>
+            </select>
+
+            <button id="downloadChartBtn" class="px-3 py-1 rounded-md bg-slate-100 text-sm">Download PNG</button>
+            <button id="printChartBtn" class="px-3 py-1 rounded-md bg-slate-100 text-sm">Print</button>
+            <button id="clearUploadBtn" class="px-3 py-1 rounded-md bg-red-50 text-sm text-red-700">Clear</button>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2 space-y-4">
+            <div id="chartContainer" class="h-96 border rounded-md flex items-center justify-center p-4">
+              <canvas id="resultChart" width="800" height="420"></canvas>
+            </div>
+
+            <div id="tablePreviewWrapper" class="border rounded-md p-3">
+              <h3 class="text-sm font-medium mb-2">Data preview (first rows)</h3>
+              <div id="tablePreview" class="overflow-auto max-h-64"></div>
+            </div>
+          </div>
+
+          <div>
+            <div class="border rounded-md p-3">
+              <h3 class="text-sm font-medium">Columns</h3>
+              <div id="columnsList" class="mt-2 text-sm text-slate-700 space-y-2">
+                <p class="text-xs text-slate-400">Upload a file to detect columns</p>
+              </div>
+            </div>
+
+            <div class="mt-4 border rounded-md p-3">
+              <h3 class="text-sm font-medium">Chart Settings</h3>
+              <div class="mt-2 space-y-2 text-sm">
+                <div>
+                  <label class="block text-xs text-slate-500">Label column</label>
+                  <select id="labelColumn" class="w-full mt-1 rounded-md border px-2 py-1"></select>
+                </div>
+                <div>
+                  <label class="block text-xs text-slate-500">Value column</label>
+                  <select id="valueColumn" class="w-full mt-1 rounded-md border px-2 py-1"></select>
+                </div>
+                <!-- For bubble charts -->
+                <div id="bubbleExtras" class="hidden">
+                  <div>
+                    <label class="block text-xs text-slate-500">X column</label>
+                    <select id="xColumn" class="w-full mt-1 rounded-md border px-2 py-1"></select>
+                  </div>
+                  <div>
+                    <label class="block text-xs text-slate-500">Y column</label>
+                    <select id="yColumn" class="w-full mt-1 rounded-md border px-2 py-1"></select>
+                  </div>
+                  <div>
+                    <label class="block text-xs text-slate-500">Size column</label>
+                    <select id="sizeColumn" class="w-full mt-1 rounded-md border px-2 py-1"></select>
+                  </div>
+                </div>
+
+                <button id="renderChartBtn" class="w-full bg-indigo-600 text-white py-1.5 rounded-md text-sm hover:bg-indigo-700">Render Chart</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Upload modal (hidden) -->
+  <div id="uploadModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40">
+    <div class="w-11/12 md:w-2/3 lg:w-1/2 bg-white rounded-xl p-6 shadow-lg">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-semibold">Upload Excel / CSV</h3>
+        <button id="closeUploadModal" class="text-slate-500 hover:text-slate-800">✕</button>
+      </div>
+
+      <p class="mt-2 text-sm text-slate-500">Drag & drop an .xlsx, .xls, or .csv file here, or click to select one.</p>
+
+      <div id="dropzone" class="mt-4 border-2 border-dashed border-slate-200 rounded-md p-6 text-center text-slate-500 cursor-pointer">
+        <div>
+          <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16l-3-3m0 0l3-3m-3 3h18M13 7v6m0 0l-3-3m3 3l3-3" />
+          </svg>
+        </div>
+        <div class="mt-3">
+          <p class="font-medium">Drop file here</p>
+          <p class="text-xs mt-1">.xlsx, .xls, .csv (max ~10MB recommended)</p>
+        </div>
+
+        <input id="fileInput" type="file" accept=".csv,.xlsx,.xls" class="hidden" />
+      </div>
+
+      <div id="uploadFeedback" class="mt-3 text-sm text-red-600 hidden"></div>
+
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="cancelUpload" class="px-3 py-1 rounded-md border">Cancel</button>
+        <button id="confirmUpload" class="px-3 py-1 rounded-md bg-indigo-600 text-white">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Templates and small utilities -->
+  <template id="tableTemplate">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-100 text-slate-700 text-xs">
+      </thead>
+      <tbody class="divide-y">
+      </tbody>
+    </table>
+  </template>
+
+  <!-- Scripts -->
+  <script src="./script.js" defer></script>
+</body>
 </html>
