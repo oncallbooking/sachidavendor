@@ -68,3 +68,19 @@ canvas { max-width:100% !important; }
 
 /* preview badges */
 .badge-detected { background: rgba(79,70,229,0.12); color: var(--accent); border-radius:8px; padding:4px 6px; font-weight:600; }
+
+body {
+  background: #f8f9fa;
+  font-family: 'Segoe UI', sans-serif;
+}
+
+#sidebar {
+  width: 260px;
+  min-height: 100vh;
+}
+
+#chartWrapper {
+  position: relative;
+  height: 420px;
+}
+
