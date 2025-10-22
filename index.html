@@ -226,62 +226,60 @@
                     </div>
                 </div>
 
-                <!-- Charts Grid -->
-                <div class="charts-grid" id="chartsGrid" style="display: none;">
-                    <!-- Primary Chart -->
-                    <div class="chart-card chart-primary">
-                        <div class="chart-header">
-                            <h3 id="chartTitle">Data Visualization</h3>
-                            <div class="chart-actions">
-                                <button class="chart-action-btn" id="fullscreenChart" title="Fullscreen">
-                                    <i class="fas fa-expand"></i>
-                                </button>
-                                <button class="chart-action-btn" id="downloadChart" title="Download">
-                                    <i class="fas fa-download"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="chart-body">
-                            <canvas id="mainChart"></canvas>
-                            <div id="heatmapContainer" style="display: none;"></div>
-                            <div id="treemapContainer" style="display: none;"></div>
-                        </div>
-                    </div>
-
-                    <!-- India Map -->
-                    <div class="chart-card">
-                        <div class="chart-header">
-                            <h3><i class="fas fa-map-marker-alt"></i> Geographic Distribution</h3>
-                            <span class="badge-status" id="mapStatus">Ready</span>
-                        </div>
-                        <div class="chart-body">
-                            <div id="indiaMap" style="height: 400px; border-radius: 12px;"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Data Table Section -->
-                <div class="table-section" id="tableSection" style="display: none;">
-                    <div class="table-header">
-                        <h3><i class="fas fa-table"></i> Data Explorer</h3>
-                        <div class="table-controls">
-                            <input type="text" id="tableSearch" class="form-control-custom" placeholder="Search in table...">
-                            <select id="rowsPerPage" class="form-select-custom">
-                                <option value="10">10 rows</option>
-                                <option value="25" selected>25 rows</option>
-                                <option value="50">50 rows</option>
-                                <option value="100">100 rows</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="table-wrapper">
-                        <div id="dataTable"></div>
-                    </div>
-                    <div class="table-pagination" id="tablePagination"></div>
-                </div>
+         <!-- Charts Grid -->
+<div class="charts-grid" id="chartsGrid" style="display: none;">
+    <!-- Primary Chart (Left) -->
+    <div class="chart-card chart-primary">
+        <div class="chart-header">
+            <h3 id="chartTitle">Data Visualization</h3>
+            <div class="chart-actions">
+                <button class="chart-action-btn" id="fullscreenChart" title="Fullscreen">
+                    <i class="fas fa-expand"></i>
+                </button>
+                <button class="chart-action-btn" id="downloadChart" title="Download">
+                    <i class="fas fa-download"></i>
+                </button>
             </div>
-        </main>
+        </div>
+        <div class="chart-body">
+            <canvas id="mainChart"></canvas>
+            <div id="heatmapContainer" style="display: none;"></div>
+            <div id="treemapContainer" style="display: none;"></div>
+        </div>
     </div>
+
+    <!-- India Map (Right) -->
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-map-marker-alt"></i> Geographic Distribution</h3>
+            <span class="badge-status" id="mapStatus">Ready</span>
+        </div>
+        <div class="chart-body">
+            <div id="indiaMap" style="height: 400px; border-radius: 12px;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Full Excel-Like Data Table Section (Below) -->
+<div class="table-section" id="tableSection" style="display: none;">
+    <div class="table-header">
+        <h3><i class="fas fa-table"></i> Data Explorer</h3>
+        <div class="table-controls">
+            <input type="text" id="tableSearch" class="form-control-custom" placeholder="Search in table...">
+            <select id="rowsPerPage" class="form-select-custom">
+                <option value="10">10 rows</option>
+                <option value="25" selected>25 rows</option>
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+            </select>
+        </div>
+    </div>
+    <div class="table-wrapper">
+        <div id="dataTable"></div>
+    </div>
+    <div class="table-pagination" id="tablePagination"></div>
+</div>
+
 
     <!-- Upload Modal -->
     <div class="modal-overlay" id="uploadModal">
