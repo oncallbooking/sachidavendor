@@ -196,8 +196,15 @@ h1, h2, h3, h4, h5, h6 {
 
 .logo-container {
     display: flex;
-    gap: 16px;
+    justify-content: center;
     align-items: center;
+    padding: 15px;
+}
+
+.logo-image {
+    max-width: 160px;
+    height: auto;
+    border-radius: 8px; /* optional: gives a softer look */
 }
 
 .logo-icon {
