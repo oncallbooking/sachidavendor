@@ -1,679 +1,681 @@
 /**
  * script.js
- * Main JavaScript for Sachidas Vendors Dashboard (Upload & Charts)
+ * Excel upload + auto visualization integrated into the existing vendor dashboard.
  *
- * - Uses Leaflet for map
- * - Chart.js for charts
- * - SheetJS (XLSX) for client-side Excel/CSV parsing
+ * Features implemented:
+ * - Drag & drop / file input for .xlsx and .csv
+ * - SheetJS (xlsx) used to parse Excel client-side
+ * - Auto-detection of headers and numeric/categorical columns
+ * - Chart.js rendering: pie, bar, line, bubble (auto suggestions)
+ * - Leaflet map centered on India; geocoding via Nominatim (if needed)
+ * - Filters, preview table (10-20 rows), export processed data (SheetJS), and print
+ * - Basic persistence via localStorage (last dataset)
  *
- * Features:
- * - Sidebar Upload button opens modal
- * - Drag & drop or file select (.xlsx, .xls, .csv)
- * - Auto-detect headers & column types (numeric vs categorical)
- * - Render charts (pie, bar, line, bubble) using Chart.js
- * - Download chart PNG and print functionality
- * - Preview table showing first rows
- *
- * NOTE: This file is modular and well-commented.
+ * Note: Keep vendor map/filter functionality intact — this is additive.
  */
 
-/* ============================
-   Helper / Utility Functions
-   ============================ */
+/* =========================
+   Globals & Helpers
+   ========================= */
+let workbook = null;
+let currentSheetName = null;
+let currentData = []; // array of row objects
+let originalData = []; // copy as loaded
+let detectedMeta = { headers: [], numeric: [], categorical: [] };
+let mainChart = null;
+let mapInstance = null;
+let mapMarkersLayer = null;
+let lastChartType = 'auto';
 
-/**
- * Simple DOM selector helpers
- */
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+// DOM elements
+const openUploadBtn = document.getElementById('openUploadBtn');
+const uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const chooseFileBtn = document.getElementById('chooseFileBtn');
+const loadFileBtn = document.getElementById('loadFileBtn');
+const sheetSelect = document.getElementById('sheetSelect');
+const sheetList = document.getElementById('sheetList');
+const sheetPreview = document.getElementById('sheetPreview');
+const uploadErrors = document.getElementById('uploadErrors');
+const chartTypeSelect = document.getElementById('chartTypeSelect');
+const refreshChartsBtn = document.getElementById('refreshCharts');
+const topNInput = document.getElementById('topN');
+const previewTableWrapper = document.getElementById('previewTableWrapper');
+const previewTableContainer = document.getElementById('previewTableContainer');
+const mainChartCanvas = document.getElementById('mainChart');
+const downloadChartBtn = document.getElementById('downloadChartBtn');
+const tableSearch = document.getElementById('tableSearch');
+const dataTableContainer = document.getElementById('dataTableContainer');
+const exportCsvBtn = document.getElementById('exportCsvBtn');
+const downloadDataBtn = document.getElementById('downloadDataBtn');
+const printDashboardBtn = document.getElementById('printDashboardBtn');
+const mapStatus = document.getElementById('mapStatus');
+const mapEl = document.getElementById('map');
+const filterControls = document.getElementById('filterControls');
 
-/**
- * Infer column types by sampling values
- * @param {Array<Object>} rows - array of objects (header->value)
- * @param {Number} sampleSize - how many rows to sample
- * @returns {Object} mapping header -> 'numeric'|'categorical'
- */
-function inferColumnTypes(rows, sampleSize = 30) {
-  const types = {};
-  if (!rows || rows.length === 0) return types;
-  const headers = Object.keys(rows[0]);
+// init
+document.addEventListener('DOMContentLoaded', () => {
+  initMap();
+  wireUi();
+  tryReloadFromLocal();
+});
 
-  headers.forEach((h) => {
-    let numericCount = 0;
-    let totalCount = 0;
-    for (let i = 0; i < Math.min(sampleSize, rows.length); i++) {
-      const v = rows[i][h];
-      if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
-        continue;
-      }
-      totalCount++;
-      // treat if value parses to finite number
-      if (!isNaN(Number(String(v).replace(/,/g, '')))) {
-        numericCount++;
-      }
-    }
-    // if more than half non-empty that are numeric -> numeric
-    types[h] = (totalCount > 0 && numericCount / totalCount >= 0.6) ? 'numeric' : 'categorical';
+/* =========================
+   UI wiring
+   ========================= */
+function wireUi() {
+  openUploadBtn.addEventListener('click', () => {
+    uploadErrors.style.display = 'none';
+    fileInput.value = '';
+    sheetSelect.innerHTML = '';
+    sheetPreview.style.display = 'none';
+    loadFileBtn.disabled = true;
+    uploadModal.show();
   });
 
-  return types;
+  chooseFileBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', handleFileChosen);
+
+  ;['dragenter','dragover'].forEach(ev => {
+    dropZone.addEventListener(ev, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.add('dragover');
+    });
+  });
+  ;['dragleave','drop'].forEach(ev => {
+    dropZone.addEventListener(ev, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZone.classList.remove('dragover');
+    });
+  });
+
+  dropZone.addEventListener('drop', e => {
+    const files = (e.dataTransfer && e.dataTransfer.files) || [];
+    if (files.length) {
+      fileInput.files = files;
+      handleFileChosen();
+    }
+  });
+
+  loadFileBtn.addEventListener('click', () => {
+    // load workbook -> populate sheet select -> pick first sheet by default
+    if (!workbook) return showUploadError('No file loaded.');
+    populateSheetSelect();
+    uploadModal.hide();
+    // automatically load the first sheet
+    const firstSheet = sheetSelect.querySelector('option')?.value;
+    if (firstSheet) {
+      sheetSelect.value = firstSheet;
+      loadSheetToVisualizer(firstSheet);
+    }
+  });
+
+  sheetSelect.addEventListener('change', () => {
+    const s = sheetSelect.value;
+    if (s) loadSheetToVisualizer(s);
+  });
+
+  refreshChartsBtn.addEventListener('click', () => {
+    if (!currentData.length) return alert('No data loaded');
+    renderCurrentChart();
+  });
+
+  chartTypeSelect.addEventListener('change', () => renderCurrentChart());
+  topNInput.addEventListener('change', () => renderCurrentChart());
+
+  downloadChartBtn.addEventListener('click', () => {
+    if (!mainChart) return;
+    const link = document.createElement('a');
+    link.download = `chart-${(new Date()).toISOString()}.png`;
+    link.href = mainChart.toBase64Image();
+    link.click();
+  });
+
+  tableSearch.addEventListener('input', () => renderDataTable());
+  exportCsvBtn.addEventListener('click', () => exportProcessedData());
+  downloadDataBtn.addEventListener('click', () => exportProcessedData());
+
+  printDashboardBtn.addEventListener('click', () => window.print());
 }
 
-/**
- * Creates a shortened slug for ids
- */
-function slugify(s) {
-  return String(s || '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9\-]/g, '');
+/* =========================
+   File handling
+   ========================= */
+function handleFileChosen() {
+  uploadErrors.style.display = 'none';
+  const f = fileInput.files[0];
+  if (!f) return;
+  const name = f.name.toLowerCase();
+  if (!(/\.(xlsx|xls|csv)$/i.test(name))) {
+    return showUploadError('Only .xlsx, .xls, and .csv files are supported.');
+  }
+
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const data = ev.target.result;
+    try {
+      if (name.endsWith('.csv')) {
+        // parse CSV using PapaParse
+        const text = data instanceof ArrayBuffer ? new TextDecoder().decode(data) : data;
+        const parsed = Papa.parse(text, { header: true, dynamicTyping: true });
+        workbook = { Sheets: { Sheet1: XLSX.utils.sheet_to_json(XLSX.utils.aoa_to_sheet(parsed.data.map(r => Object.values(r)))) }, SheetNames: ['Sheet1'] };
+        // simpler: convert parsed.data to object array
+        const aoa = [Object.keys(parsed.data[0] || {})].concat(parsed.data.map(r => Object.values(r)));
+        workbook = { Sheets: { Sheet1: XLSX.utils.aoa_to_sheet(aoa) }, SheetNames: ['Sheet1'] };
+      } else {
+        // xlsx parsing
+        const arr = new Uint8Array(data);
+        workbook = XLSX.read(arr, { type: 'array' });
+      }
+
+      // show sheet preview
+      sheetPreview.style.display = 'block';
+      sheetList.innerHTML = '';
+      workbook.SheetNames.forEach((s,i) => {
+        const item = document.createElement('li');
+        item.className = 'list-group-item d-flex justify-content-between align-items-center';
+        item.textContent = s;
+        const badge = document.createElement('span');
+        badge.className = 'badge bg-primary rounded-pill';
+        badge.textContent = 'Sheet ' + (i+1);
+        item.appendChild(badge);
+        sheetList.appendChild(item);
+      });
+      loadFileBtn.disabled = false;
+      populateSheetSelect(); // immediate selection if desired
+      showUploadMessage('File loaded. Choose sheet to view.');
+      // store raw workbook in memory but not persist full binary in localStorage
+    } catch (err) {
+      console.error(err);
+      showUploadError('Failed to parse file. Make sure file is valid and not corrupted.');
+    }
+  };
+
+  if (name.endsWith('.csv')) {
+    reader.readAsText(f);
+  } else {
+    reader.readAsArrayBuffer(f);
+  }
 }
 
-/**
- * Create a table showing first rows (limit)
- */
-function renderTablePreview(rows = [], limit = 10) {
-  const previewContainer = $('#tablePreview');
-  previewContainer.innerHTML = '';
+function showUploadError(msg) {
+  uploadErrors.style.display = 'block';
+  uploadErrors.textContent = msg;
+}
 
-  if (!rows || rows.length === 0) {
-    previewContainer.innerHTML = '<div class="text-sm text-slate-500">No data to preview.</div>';
+function showUploadMessage(msg) {
+  uploadErrors.style.display = 'block';
+  uploadErrors.classList.remove('text-danger');
+  uploadErrors.classList.add('text-success');
+  uploadErrors.textContent = msg;
+  setTimeout(() => {
+    uploadErrors.style.display = 'none';
+    uploadErrors.classList.remove('text-success');
+    uploadErrors.classList.add('text-danger');
+  }, 2500);
+}
+
+function populateSheetSelect() {
+  if (!workbook) return;
+  sheetSelect.innerHTML = '';
+  workbook.SheetNames.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sheetSelect.appendChild(opt);
+  });
+  sheetSelect.disabled = false;
+}
+
+/* =========================
+   Load sheet into visualizer
+   ========================= */
+function loadSheetToVisualizer(sheetName) {
+  if (!workbook || !workbook.Sheets[sheetName]) return;
+  currentSheetName = sheetName;
+  // convert to JSON (array of objects) using SheetJS
+  try {
+    const ws = workbook.Sheets[sheetName];
+    const json = XLSX.utils.sheet_to_json(ws, { defval: null });
+    if (!json || !json.length) {
+      alert('Sheet is empty or no rows found.');
+      return;
+    }
+    originalData = json.map(r => ({...r}));
+    currentData = originalData.slice();
+    detectColumns(currentData);
+    renderDataTable();
+    renderFilters();
+    renderCurrentChart();
+    attemptMapPlot(currentData);
+    // enable exports
+    exportCsvBtn.disabled = false;
+    downloadDataBtn.disabled = false;
+    // persist minimal dataset (headers + first 200 rows) to localStorage
+    try {
+      const mini = { sheet: sheetName, preview: currentData.slice(0,200) };
+      localStorage.setItem('lastDatasetPreview', JSON.stringify(mini));
+    } catch(e){ /* ignore */ }
+  } catch (err) {
+    console.error(err);
+    alert('Failed to load sheet to visualizer: ' + err.message);
+  }
+}
+
+/* =========================
+   Column detection & meta
+   ========================= */
+function detectColumns(data) {
+  const headers = Object.keys(data[0] || {});
+  const numeric = [];
+  const categorical = [];
+
+  headers.forEach(h => {
+    let numericCount = 0, totalCount = 0;
+    for (let i=0;i<data.length && i<200;i++){
+      const v = data[i][h];
+      if (v === null || v === undefined || v === '') { totalCount++; continue; }
+      totalCount++;
+      if (typeof v === 'number' && !isNaN(v)) numericCount++;
+      else if ( !isNaN(parseFloat(v)) && isFinite(v) ) numericCount++;
+    }
+    if (totalCount>0 && numericCount/totalCount > 0.6) numeric.push(h);
+    else categorical.push(h);
+  });
+
+  detectedMeta.headers = headers;
+  detectedMeta.numeric = numeric;
+  detectedMeta.categorical = categorical;
+}
+
+/* =========================
+   Rendering charts
+   ========================= */
+function renderCurrentChart() {
+  if (!currentData.length) return;
+  const chartType = chartTypeSelect.value === 'auto' ? autoSuggestChart() : chartTypeSelect.value;
+  lastChartType = chartType;
+  previewTableWrapper.style.display = chartType === 'table' ? 'block' : 'none';
+  if (chartType === 'table') {
+    renderPreviewTable();
+    if (mainChart) { mainChart.destroy(); mainChart = null; downloadChartBtn.disabled = true; }
+    return;
+  }
+  const ctx = mainChartCanvas.getContext('2d');
+
+  // choose fields automatically
+  const { xField, yField, categoryField } = chooseFieldsForChart(chartType);
+
+  // create dataset according to chosen fields
+  let chartConfig = null;
+  try {
+    if (chartType === 'pie') chartConfig = generatePieConfig(categoryField);
+    else if (chartType === 'bar') chartConfig = generateBarConfig(xField, yField);
+    else if (chartType === 'line') chartConfig = generateLineConfig(xField, yField);
+    else if (chartType === 'bubble') chartConfig = generateBubbleConfig();
+  } catch (err) {
+    console.error(err);
+    alert('Failed to generate chart: ' + err.message);
     return;
   }
 
-  const template = document.getElementById('tableTemplate');
-  const table = template.content.cloneNode(true);
-  const thead = table.querySelector('thead');
-  const tbody = table.querySelector('tbody');
-
-  const headers = Object.keys(rows[0]);
-
-  // header row
-  const headerRow = document.createElement('tr');
-  headers.forEach(h => {
-    const th = document.createElement('th');
-    th.className = 'px-2 py-1 text-left';
-    th.textContent = h;
-    headerRow.appendChild(th);
-  });
-  thead.appendChild(headerRow);
-
-  // body rows
-  const displayRows = rows.slice(0, limit);
-  displayRows.forEach(r => {
-    const tr = document.createElement('tr');
-    headers.forEach(h => {
-      const td = document.createElement('td');
-      td.className = 'px-2 py-1';
-      let cell = r[h];
-      if (cell === null || cell === undefined) cell = '';
-      td.textContent = String(cell);
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-
-  previewContainer.appendChild(table);
+  // destroy previous
+  if (mainChart) { try { mainChart.destroy(); } catch(e){} }
+  mainChart = new Chart(ctx, chartConfig);
+  downloadChartBtn.disabled = false;
 }
 
-/**
- * Safe parse number (handles commas)
- */
-function toNumber(v) {
-  if (v === null || v === undefined) return NaN;
-  const n = Number(String(v).replace(/,/g, '').trim());
-  return isFinite(n) ? n : NaN;
-}
+/* heuristics: choose fields */
+function chooseFieldsForChart(type) {
+  const numeric = detectedMeta.numeric;
+  const cat = detectedMeta.categorical;
+  let xField = null, yField = null, categoryField = null;
 
-/* ============================
-   Map & Sample Data (placeholder)
-   ============================ */
-
-/**
- * Initialize Leaflet map with sample markers
- * We'll show a few sample vendor points across India.
- */
-function initMap() {
-  const map = L.map('map', { center: [22.0, 79.0], zoom: 5, minZoom: 3 });
-  // Use OpenStreetMap tiles (works on GitHub Pages)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
-
-  // Sample vendor markers (minimal placeholder)
-  const sampleVendors = [
-    { name: 'Vendor A', lat: 19.07599, lng: 72.87766, category: 'Retail', city: 'Mumbai' },
-    { name: 'Vendor B', lat: 28.70406, lng: 77.10249, category: 'Food', city: 'Delhi' },
-    { name: 'Vendor C', lat: 12.9716, lng: 77.5946, category: 'Services', city: 'Bengaluru' },
-    { name: 'Vendor D', lat: 13.0827, lng: 80.2707, category: 'Pharmacy', city: 'Chennai' },
-    { name: 'Vendor E', lat: 22.5726, lng: 88.3639, category: 'Retail', city: 'Kolkata' }
-  ];
-
-  sampleVendors.forEach(v => {
-    const marker = L.circleMarker([v.lat, v.lng], { radius: 7, color: '#2563eb' }).addTo(map);
-    marker.bindPopup(`<strong>${v.name}</strong><div class="text-xs">${v.category} — ${v.city}</div>`);
-  });
-
-  return map;
-}
-
-/* ============================
-   Chart Helpers & State
-   ============================ */
-
-let uploadedRows = null;         // parsed rows [{header: value}, ...]
-let columnTypes = {};           // inferred types
-let chartInstance = null;       // Chart.js instance
-let currentChartType = 'auto';  // selected chart type
-
-/**
- * Destroy previous chart instance cleanly
- */
-function destroyChart() {
-  if (chartInstance) {
-    try { chartInstance.destroy(); } catch (e) { /* ignore */ }
-    chartInstance = null;
+  if (type === 'pie') {
+    categoryField = cat[0] || detectedMeta.headers[0];
+  } else if (type === 'bar') {
+    // bar: category vs numeric
+    categoryField = cat[0] || detectedMeta.headers[0];
+    yField = numeric[0] || detectedMeta.headers[1] || categoryField;
+    xField = categoryField;
+  } else if (type === 'line') {
+    // line: try to use date-like header or first numeric sequence
+    const dateLike = detectedMeta.headers.find(h => /date|time|month|year/i.test(h));
+    xField = dateLike || detectedMeta.headers[0];
+    yField = numeric[0] || detectedMeta.headers[1] || detectedMeta.headers[0];
+  } else if (type === 'bubble') {
+    // need 3 numeric fields ideally
+    xField = numeric[0] || detectedMeta.headers[0];
+    yField = numeric[1] || numeric[0] || detectedMeta.headers[1] || detectedMeta.headers[0];
+    categoryField = detectedMeta.headers.find(h => ![xField,yField].includes(h)) || detectedMeta.headers[0];
   }
+
+  return { xField, yField, categoryField };
 }
 
-/**
- * Render Chart.js chart according to specified options and data
- * Supports pie, bar, line, bubble
- */
-function renderChartOfType(type, options = {}) {
-  const canvas = document.getElementById('resultChart');
-  destroyChart();
+/* Auto-suggest chart type */
+function autoSuggestChart() {
+  if (detectedMeta.categorical.length >= 1 && detectedMeta.numeric.length >= 1) return 'bar';
+  if (detectedMeta.numeric.length >= 2) return 'bubble';
+  if (detectedMeta.categorical.length >= 1 && detectedMeta.numeric.length === 0) return 'pie';
+  return 'table';
+}
 
-  const ctx = canvas.getContext('2d');
-
-  // Build datasets & config depending on type
-  const cfg = {
-    type: type === 'bubble' ? 'bubble' : (type === 'pie' ? 'pie' : (type === 'bar' ? 'bar' : 'line')),
-    data: { labels: [], datasets: [] },
+/* Chart generators */
+function generatePieConfig(categoryField) {
+  const topN = Number(topNInput.value) || 10;
+  const counts = {};
+  currentData.forEach(r => {
+    const k = (r[categoryField] ?? 'Unknown') + '';
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  const entries = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0, topN);
+  const labels = entries.map(e=>e[0]);
+  const values = entries.map(e=>e[1]);
+  return {
+    type: 'pie',
+    data: { labels, datasets: [{ data: values, label: categoryField }] },
     options: {
       responsive: true,
-      maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'top' },
-        title: { display: true, text: options.title || '' }
-      },
-      scales: {}
+        title: { display:true, text: `Distribution by ${categoryField}` },
+        legend: { position:'right' }
+      }
     }
   };
+}
 
-  // Provide default empty chart if no data
-  if (!uploadedRows || uploadedRows.length === 0) {
-    cfg.options.plugins.title.text = 'No data';
-    chartInstance = new Chart(ctx, cfg);
-    return chartInstance;
+function generateBarConfig(xField, yField) {
+  const topN = Number(topNInput.value) || 10;
+  // aggregate numeric by category
+  const agg = {};
+  currentData.forEach(r => {
+    const cat = (r[xField] ?? 'Unknown') + '';
+    const val = parseFloat(r[yField]) || 0;
+    agg[cat] = (agg[cat] || 0) + val;
+  });
+  const entries = Object.entries(agg).sort((a,b)=>b[1]-a[1]).slice(0,topN);
+  const labels = entries.map(e=>e[0]);
+  const values = entries.map(e=>e[1]);
+  return {
+    type: 'bar',
+    data: { labels, datasets: [{ label: yField, data: values }] },
+    options: {
+      responsive: true,
+      plugins: { title: { display:true, text: `${yField} by ${xField}` }, legend: { display:false } },
+      scales: { x: { ticks:{ autoSkip: false } }, y: { beginAtZero:true } }
+    }
+  };
+}
+
+function generateLineConfig(xField, yField) {
+  // sort by xField if it looks like a date or numeric
+  const rows = currentData.slice();
+  rows.sort((a,b)=>{
+    const va = a[xField], vb = b[xField];
+    const na = Date.parse(va) || parseFloat(va) || 0;
+    const nb = Date.parse(vb) || parseFloat(vb) || 0;
+    return na - nb;
+  });
+  const labels = rows.map(r => (r[xField] ?? '') + '').slice(0,1000);
+  const values = rows.map(r => parseFloat(r[yField]) || 0).slice(0,1000);
+  return {
+    type: 'line',
+    data: { labels, datasets: [{ label: yField, data: values, fill:false, tension:0.2 }] },
+    options: {
+      responsive: true,
+      plugins: { title: { display:true, text: `${yField} over ${xField}` }, legend: { display:false } },
+      scales: { y: { beginAtZero: true } }
+    }
+  };
+}
+
+function generateBubbleConfig() {
+  // bubble: need x,y,r
+  const numeric = detectedMeta.numeric;
+  const xField = numeric[0] || detectedMeta.headers[0];
+  const yField = numeric[1] || numeric[0] || detectedMeta.headers[1] || detectedMeta.headers[0];
+  const rField = numeric[2] || numeric[0] || detectedMeta.headers[2] || detectedMeta.headers[0];
+
+  const points = currentData.map(r => {
+    const x = parseFloat(r[xField]) || 0;
+    const y = parseFloat(r[yField]) || 0;
+    const rsize = Math.max(2, Math.min(40, Math.abs(parseFloat(r[rField]) || 1)));
+    return { x, y, r: rsize };
+  }).slice(0,500);
+
+  return {
+    type: 'bubble',
+    data: { datasets: [{ label: `${yField} vs ${xField} (size=${rField})`, data: points }] },
+    options: {
+      responsive: true,
+      plugins: { title: { display:true, text: 'Bubble: multi-metric comparison' } },
+      scales: { x: { beginAtZero:true }, y: { beginAtZero:true } }
+    }
+  };
+}
+
+/* =========================
+   Data preview & table
+   ========================= */
+function renderPreviewTable() {
+  const previewRows = currentData.slice(0, 20);
+  previewTableContainer.innerHTML = renderTableFromRows(previewRows);
+}
+
+function renderDataTable() {
+  const q = (tableSearch.value || '').toLowerCase().trim();
+  const rows = currentData.filter(r => {
+    if (!q) return true;
+    return Object.values(r).some(v => (v === null || v === undefined) ? false : ('' + v).toLowerCase().includes(q));
+  });
+  dataTableContainer.innerHTML = renderTableFromRows(rows);
+  // enable export if rows exist
+  exportCsvBtn.disabled = rows.length === 0;
+}
+
+function renderTableFromRows(rows) {
+  if (!rows || !rows.length) return '<div class="p-3 text-muted">No data</div>';
+  const headers = Object.keys(rows[0]);
+  let html = '<table class="table table-sm"><thead><tr>';
+  headers.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
+  html += '</tr></thead><tbody>';
+  rows.forEach(r => {
+    html += '<tr>';
+    headers.forEach(h => html += `<td>${escapeHtml(r[h])}</td>`);
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+/* simple escape */
+function escapeHtml(v){ if (v===null || v===undefined) return ''; return (''+v).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+/* =========================
+   Export processed data (CSV/XLSX)
+   ========================= */
+function exportProcessedData() {
+  if (!currentData || !currentData.length) return alert('No data to export');
+  // convert to worksheet
+  const ws = XLSX.utils.json_to_sheet(currentData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, currentSheetName || 'Sheet1');
+  XLSX.writeFile(wb, `processed-${(new Date()).toISOString().slice(0,19)}.xlsx`);
+}
+
+/* =========================
+   Map (Leaflet) + geocoding
+   ========================= */
+function initMap() {
+  mapInstance = L.map('map', { zoomControl:true }).setView([22.0, 80.0], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(mapInstance);
+  mapMarkersLayer = L.layerGroup().addTo(mapInstance);
+}
+
+/**
+ * Attempt to plot points on the India map:
+ * - If lat/lon columns exist, plot directly
+ * - Else, if state/city-like column exists, geocode unique values via Nominatim
+ */
+async function attemptMapPlot(rows) {
+  mapStatus.textContent = 'Checking for location fields...';
+  mapMarkersLayer.clearLayers();
+
+  // detect lat/lon
+  const headers = detectedMeta.headers;
+  const latKeys = headers.filter(h => /lat|latitude/i.test(h));
+  const lonKeys = headers.filter(h => /lon|lng|longitude/i.test(h));
+  if (latKeys.length && lonKeys.length) {
+    const latK = latKeys[0], lonK = lonKeys[0];
+    rows.forEach(r => {
+      const lat = parseFloat(r[latK]);
+      const lon = parseFloat(r[lonK]);
+      if (isFinite(lat) && isFinite(lon)) {
+        addMarker(lat, lon, r);
+      }
+    });
+    mapStatus.textContent = 'Plotted lat/lon points';
+    fitMapToMarkers();
+    return;
   }
 
+  // else find city/state fields
+  const placeField = headers.find(h => /city|town|village|state|district|place|location/i.test(h));
+  if (!placeField) {
+    mapStatus.textContent = 'No location fields found';
+    return;
+  }
+
+  mapStatus.textContent = `Geocoding unique values in "${placeField}" (this may take a few seconds)`;
+  const uniquePlaces = Array.from(new Set(rows.map(r => (r[placeField]||'').toString()).filter(Boolean))).slice(0, 60);
+  const geocoded = [];
+  for (let i=0;i<uniquePlaces.length;i++){
+    const name = uniquePlaces[i];
+    try {
+      // Nominatim usage policy: throttle requests. Use 1 request every 1000ms to be kinder (may be slow).
+      // We add country=India to bias results.
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(name + ' India')}&limit=1&addressdetails=1`;
+      // small delay between requests to avoid rate limits
+      // we use a simple promise delay
+      await delay(600); // 600ms delay — adjustable
+      const resp = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+      if (!resp.ok) continue;
+      const json = await resp.json();
+      if (json && json[0]) {
+        const lat = parseFloat(json[0].lat), lon = parseFloat(json[0].lon);
+        geocoded.push({ name, lat, lon });
+      }
+    } catch (err) {
+      console.warn('geocode failed', name, err);
+    }
+  }
+
+  // map rows to geocoded coordinates
+  rows.forEach(r => {
+    const name = (r[placeField]||'').toString();
+    const geo = geocoded.find(g => g.name === name);
+    if (geo) addMarker(geo.lat, geo.lon, r);
+  });
+
+  if (mapMarkersLayer.getLayers().length) {
+    mapStatus.textContent = 'Plotted place-based points';
+    fitMapToMarkers();
+  } else {
+    mapStatus.textContent = 'Geocoding found no points (try adding latitude/longitude columns)';
+  }
+}
+
+function addMarker(lat, lon, row) {
+  const marker = L.circleMarker([lat, lon], { radius:6, color:'#3b82f6', fillColor:'#60a5fa', fillOpacity:0.8 });
+  const html = renderRowCard(row);
+  marker.bindPopup(html, { maxWidth: 320 });
+  marker.addTo(mapMarkersLayer);
+}
+
+function fitMapToMarkers() {
+  if (!mapMarkersLayer || !mapMarkersLayer.getLayers().length) return;
+  const group = L.featureGroup(mapMarkersLayer.getLayers());
+  mapInstance.fitBounds(group.getBounds().pad(0.2));
+}
+
+/* small helper to render row details in popup */
+function renderRowCard(row) {
+  const lines = Object.entries(row).map(([k,v]) => `<div><strong>${escapeHtml(k)}:</strong> ${escapeHtml(v)}</div>`).join('');
+  return `<div style="font-size:0.9rem">${lines}</div>`;
+}
+
+function delay(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
+
+/* =========================
+   Filters rendering
+   ========================= */
+function renderFilters() {
+  filterControls.innerHTML = '';
+  if (!detectedMeta.headers.length) {
+    filterControls.innerHTML = '<p class="text-muted small">Upload data to see filters</p>';
+    return;
+  }
+  // create simple filter for first two categorical columns (if present)
+  detectedMeta.categorical.slice(0,3).forEach(col => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mb-2';
+    const label = document.createElement('label'); label.className = 'form-label small mb-1'; label.textContent = col;
+    const sel = document.createElement('select'); sel.className = 'form-select form-select-sm';
+    const vals = Array.from(new Set(originalData.map(r => r[col]||'').slice(0,200))).slice(0,40);
+    const any = document.createElement('option'); any.value=''; any.textContent = 'All';
+    sel.appendChild(any);
+    vals.forEach(v => { const o = document.createElement('option'); o.value = v; o.textContent = v; sel.appendChild(o); });
+    sel.addEventListener('change', () => applyFilters());
+    wrapper.appendChild(label); wrapper.appendChild(sel);
+    filterControls.appendChild(wrapper);
+  });
+}
+
+/* Apply filters to currentData */
+function applyFilters() {
+  // read selects
+  const selects = filterControls.querySelectorAll('select');
+  const criteria = [];
+  selects.forEach(sel => {
+    const val = sel.value;
+    const label = sel.previousElementSibling?.textContent;
+    if (val && label) criteria.push({ col: label, val });
+  });
+
+  currentData = originalData.filter(r => {
+    return criteria.every(c => (r[c.col]??'')+'' === (c.val+''));
+  });
+  renderDataTable();
+  renderCurrentChart();
+  attemptMapPlot(currentData);
+}
+
+/* =========================
+   Small utilities (reload)
+   ========================= */
+function tryReloadFromLocal(){
   try {
-    if (type === 'pie') {
-      const labelCol = options.labelCol;
-      const valueCol = options.valueCol;
-      if (!labelCol || !valueCol) {
-        throw new Error('Please select label and value columns for pie chart.');
-      }
-      const labels = uploadedRows.map(r => r[labelCol] == null ? '' : String(r[labelCol]));
-      const values = uploadedRows.map(r => toNumber(r[valueCol]) || 0);
-
-      // aggregate by label (sum)
-      const agg = {};
-      for (let i = 0; i < labels.length; i++) {
-        const k = labels[i] || 'Unknown';
-        agg[k] = (agg[k] || 0) + (isFinite(values[i]) ? values[i] : 0);
-      }
-      cfg.data = { labels: Object.keys(agg), datasets: [{ data: Object.values(agg), label: valueCol }] };
-      cfg.options.plugins.title.text = `${valueCol} by ${labelCol}`;
-    } else if (type === 'bar') {
-      const labelCol = options.labelCol;
-      const valueCol = options.valueCol;
-      if (!labelCol || !valueCol) {
-        throw new Error('Please select label and value columns for bar chart.');
-      }
-      const labels = uploadedRows.map(r => r[labelCol] == null ? '' : String(r[labelCol]));
-      const values = uploadedRows.map(r => toNumber(r[valueCol]) || 0);
-
-      // aggregate by label (sum)
-      const agg = {};
-      for (let i = 0; i < labels.length; i++) {
-        const k = labels[i] || 'Unknown';
-        agg[k] = (agg[k] || 0) + (isFinite(values[i]) ? values[i] : 0);
-      }
-      cfg.data = { labels: Object.keys(agg), datasets: [{ label: valueCol, data: Object.values(agg), backgroundColor: undefined }] };
-      cfg.options.plugins.title.text = `${valueCol} by ${labelCol}`;
-      cfg.options.scales = { x: { beginAtZero: true }, y: { beginAtZero: true } };
-    } else if (type === 'line') {
-      const labelCol = options.labelCol;
-      const valueCol = options.valueCol;
-      // If labelCol is numeric/time, we can sort; else use row index
-      const labels = uploadedRows.map((r, i) => labelCol ? (r[labelCol] == null ? i : String(r[labelCol])) : i);
-      const values = uploadedRows.map(r => toNumber(r[valueCol]) || 0);
-      cfg.data = { labels, datasets: [{ label: valueCol || 'Value', data: values, fill: false, tension: 0.2 }] };
-      cfg.options.plugins.title.text = `${valueCol} over ${labelCol || 'index'}`;
-      cfg.options.scales = { x: { display: true }, y: { beginAtZero: true } };
-    } else if (type === 'bubble') {
-      // requires xCol, yCol, sizeCol
-      const xCol = options.xCol;
-      const yCol = options.yCol;
-      const sizeCol = options.sizeCol;
-      if (!xCol || !yCol || !sizeCol) {
-        throw new Error('Select X, Y and Size columns for bubble chart.');
-      }
-      const points = uploadedRows.map(r => {
-        return {
-          x: toNumber(r[xCol]) || 0,
-          y: toNumber(r[yCol]) || 0,
-          r: Math.max(3, (Math.abs(toNumber(r[sizeCol])) || 1) / 2) // scale size to radius
-        };
-      });
-      cfg.data = { datasets: [{ label: `${yCol} vs ${xCol}`, data: points }] };
-      cfg.options.plugins.title.text = `${yCol} vs ${xCol} (size: ${sizeCol})`;
-      cfg.options.scales = { x: { beginAtZero: true }, y: { beginAtZero: true } };
-    } else {
-      // fallback empty
-      cfg.options.plugins.title.text = 'Unsupported chart type';
-    }
-
-    chartInstance = new Chart(ctx, cfg);
-    return chartInstance;
-  } catch (err) {
-    // Graceful error message on chart area
-    destroyChart();
-    const ctx2 = canvas.getContext('2d');
-    ctx2.clearRect(0, 0, canvas.width, canvas.height);
-    ctx2.font = '14px sans-serif';
-    ctx2.fillStyle = '#9ca3af';
-    ctx2.textAlign = 'center';
-    ctx2.fillText(err.message || 'Error rendering chart', canvas.width / 2, canvas.height / 2);
-    console.error(err);
-  }
+    const raw = localStorage.getItem('lastDatasetPreview');
+    if (!raw) return;
+    const p = JSON.parse(raw);
+    // show small preview message
+    console.info('Found saved dataset preview from previous session:', p.sheet);
+    // Not automatically loading full dataset (no workbook saved), but we can show hint
+  } catch(e){}
 }
 
-/* ============================
-   File Upload & Parsing
-   ============================ */
+/* =========================
+   Misc helpers
+   ========================= */
 
-/**
- * Parse file (xlsx or csv) using SheetJS
- * Returns Promise resolving to array of row objects
- */
-function parseFileToRows(file) {
-  return new Promise((resolve, reject) => {
-    if (!file) return reject(new Error('No file provided'));
+/* escape in HTML already implemented above */
 
-    const reader = new FileReader();
-    const fname = file.name.toLowerCase();
-
-    reader.onerror = (e) => {
-      reject(new Error('Failed to read file'));
-    };
-
-    // For binary file types use readAsArrayBuffer
-    reader.onload = (e) => {
-      try {
-        const data = e.target.result;
-
-        // detect by extension
-        if (fname.endsWith('.csv')) {
-          // parse CSV (sheetjs can parse string)
-          const text = new TextDecoder('utf-8').decode(data);
-          const workbook = XLSX.read(text, { type: 'string', raw: false });
-          const firstSheetName = workbook.SheetNames[0];
-          const sheet = workbook.Sheets[firstSheetName];
-          const json = XLSX.utils.sheet_to_json(sheet, { defval: null });
-          resolve(json);
-        } else {
-          // try spreadsheet (xlsx/xls)
-          const workbook = XLSX.read(data, { type: 'array' });
-          const firstSheetName = workbook.SheetNames[0];
-          const sheet = workbook.Sheets[firstSheetName];
-          const json = XLSX.utils.sheet_to_json(sheet, { defval: null });
-          resolve(json);
-        }
-      } catch (err) {
-        reject(err);
-      }
-    };
-
-    // When reading .csv we need arrayBuffer then decode; easiest: always read as arraybuffer
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-/* ============================
-   UI Bindings & Event Wiring
-   ============================ */
-
-function setupUI() {
-  const uploadModal = $('#uploadModal');
-  const uploadBtn = $('#uploadBtn');
-  const closeUploadModal = $('#closeUploadModal');
-  const dropzone = $('#dropzone');
-  const fileInput = $('#fileInput');
-  const uploadFeedback = $('#uploadFeedback');
-  const confirmUpload = $('#confirmUpload');
-  const cancelUpload = $('#cancelUpload');
-  const uploadedDataSection = $('#uploadedDataSection');
-  const uploadedTabBtn = $('#uploadedTabBtn');
-  const chartTypeSelect = $('#chartTypeSelect');
-  const renderChartBtn = $('#renderChartBtn');
-  const labelColumn = $('#labelColumn');
-  const valueColumn = $('#valueColumn');
-  const xColumn = $('#xColumn');
-  const yColumn = $('#yColumn');
-  const sizeColumn = $('#sizeColumn');
-  const bubbleExtras = $('#bubbleExtras');
-  const columnsList = $('#columnsList');
-  const downloadChartBtn = $('#downloadChartBtn');
-  const printChartBtn = $('#printChartBtn');
-  const clearUploadBtn = $('#clearUploadBtn');
-
-  // Modal open/close
-  uploadBtn.addEventListener('click', () => {
-    uploadModal.classList.remove('hidden');
-  });
-  closeUploadModal.addEventListener('click', () => uploadModal.classList.add('hidden'));
-  cancelUpload.addEventListener('click', () => uploadModal.classList.add('hidden'));
-  confirmUpload.addEventListener('click', () => uploadModal.classList.add('hidden'));
-
-  // dropzone events
-  ;['dragenter', 'dragover'].forEach(ev => {
-    dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.add('dragover');
-    });
-  });
-
-  ;['dragleave', 'dragend', 'drop'].forEach(ev => {
-    dropzone.addEventListener(ev, (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      dropzone.classList.remove('dragover');
-    });
-  });
-
-  dropzone.addEventListener('drop', (e) => {
-    const files = (e.dataTransfer && e.dataTransfer.files) ? e.dataTransfer.files : [];
-    handleFileSelection(files[0]);
-  });
-
-  dropzone.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    const f = (e.target.files && e.target.files[0]) ? e.target.files[0] : null;
-    if (f) handleFileSelection(f);
-  });
-
-  // uploaded data tab
-  uploadedTabBtn.addEventListener('click', () => {
-    // show tab
-    uploadedDataSection.classList.remove('hidden');
-    window.scrollTo({ top: uploadedDataSection.offsetTop - 20, behavior: 'smooth' });
-  });
-
-  // Chart type select
-  chartTypeSelect.addEventListener('change', (e) => {
-    currentChartType = e.target.value;
-    // show/hide bubble extras
-    bubbleExtras.classList.toggle('hidden', currentChartType !== 'bubble');
-  });
-
-  // Render chart button
-  renderChartBtn.addEventListener('click', () => {
-    if (!uploadedRows) {
-      alert('Please upload a file first.');
-      return;
-    }
-    const selectedType = chartTypeSelect.value === 'auto' ? autoDetectChartType() : chartTypeSelect.value;
-    const opts = buildChartOptionsFromUI(selectedType);
-    renderChartOfType(selectedType, opts);
-  });
-
-  // Download chart
-  downloadChartBtn.addEventListener('click', () => {
-    if (!chartInstance) {
-      alert('No chart to download.');
-      return;
-    }
-    try {
-      const url = chartInstance.toBase64Image();
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `chart-${Date.now()}.png`;
-      a.click();
-    } catch (err) {
-      console.error(err);
-      alert('Failed to download chart.');
-    }
-  });
-
-  // Print chart
-  printChartBtn.addEventListener('click', () => {
-    if (!chartInstance) {
-      alert('No chart to print.');
-      return;
-    }
-    try {
-      const img = chartInstance.toBase64Image();
-      const w = window.open('', '_blank');
-      if (!w) { alert('Popup blocked.'); return; }
-      w.document.write(`<img src="${img}" style="max-width:100%"><script>window.print();</script>`);
-      w.document.close();
-    } catch (err) {
-      console.error(err);
-      alert('Failed to print chart.');
-    }
-  });
-
-  // Clear uploaded data
-  clearUploadBtn.addEventListener('click', () => {
-    uploadedRows = null;
-    columnTypes = {};
-    destroyChart();
-    $('#tablePreview').innerHTML = '';
-    columnsList.innerHTML = '<p class="text-xs text-slate-400">Upload a file to detect columns</p>';
-    $('#labelColumn').innerHTML = '';
-    $('#valueColumn').innerHTML = '';
-    $('#xColumn').innerHTML = '';
-    $('#yColumn').innerHTML = '';
-    $('#sizeColumn').innerHTML = '';
-    uploadedDataSection.classList.add('hidden');
-    alert('Cleared uploaded data and charts.');
-  });
-
-  // Simple sample chart in analytics (vendors by category)
-  setTimeout(() => {
-    try {
-      const ctx = document.getElementById('sampleChart').getContext('2d');
-      new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: ['Retail', 'Food', 'Services', 'Pharmacy'],
-          datasets: [{ data: [40, 30, 30, 20] }]
-        },
-        options: { responsive: true, maintainAspectRatio: false }
-      });
-    } catch (e) { /* ignore */ }
-  }, 200);
-}
-
-/**
- * Build chart options by reading UI selections
- */
-function buildChartOptionsFromUI(type) {
-  const opts = {};
-  opts.labelCol = $('#labelColumn').value || null;
-  opts.valueCol = $('#valueColumn').value || null;
-  opts.xCol = $('#xColumn').value || null;
-  opts.yCol = $('#yColumn').value || null;
-  opts.sizeCol = $('#sizeColumn').value || null;
-  opts.title = `${type.charAt(0).toUpperCase() + type.slice(1)} chart`;
-  return opts;
-}
-
-/**
- * Auto-detect best chart type using heuristics:
- * - If there is at least one categorical + one numeric -> pie or bar
- * - If there are >=2 numeric columns -> bubble or line
- * Priority: bubble if 3 numeric, else bar if categorical, else line
- */
-function autoDetectChartType() {
-  if (!columnTypes) return 'bar';
-  const headers = Object.keys(columnTypes || {});
-  const numericCols = headers.filter(h => columnTypes[h] === 'numeric');
-  const catCols = headers.filter(h => columnTypes[h] === 'categorical');
-
-  if (numericCols.length >= 3) return 'bubble';
-  if (catCols.length >= 1 && numericCols.length >= 1) return 'bar';
-  if (numericCols.length >= 1) return 'line';
-  return 'bar';
-}
-
-/* ============================
-   File Handling Flow
-   ============================ */
-
-/**
- * Called when a file is selected/dropped
- */
-function handleFileSelection(file) {
-  const uploadFeedback = $('#uploadFeedback');
-  uploadFeedback.classList.add('hidden');
-  uploadFeedback.textContent = '';
-
-  if (!file) {
-    uploadFeedback.textContent = 'No file selected.';
-    uploadFeedback.classList.remove('hidden');
-    return;
-  }
-
-  const allowed = ['.csv', '.xls', '.xlsx'];
-  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-  if (!allowed.includes(ext)) {
-    uploadFeedback.textContent = 'Unsupported file type. Please upload .xlsx, .xls, or .csv.';
-    uploadFeedback.classList.remove('hidden');
-    return;
-  }
-
-  // parse
-  parseFileToRows(file).then(rows => {
-    if (!rows || rows.length === 0) {
-      uploadFeedback.textContent = 'File parsed but contains no rows.';
-      uploadFeedback.classList.remove('hidden');
-      return;
-    }
-
-    // set global state
-    uploadedRows = rows;
-    columnTypes = inferColumnTypes(rows);
-
-    // populate UI
-    populateColumnsUI(rows, columnTypes);
-
-    // show preview & uploaded tab
-    renderTablePreview(rows, 15);
-    $('#uploadedDataSection').classList.remove('hidden');
-
-    // auto-select reasonable columns
-    autoSelectColumns();
-
-    // close modal
-    $('#uploadModal').classList.add('hidden');
-
-    // give user feedback
-    alert(`File "${file.name}" loaded — ${rows.length} rows detected, ${Object.keys(rows[0]).length} columns.`);
-  }).catch(err => {
-    console.error(err);
-    uploadFeedback.textContent = 'Failed to parse file: ' + (err.message || 'Unknown error');
-    uploadFeedback.classList.remove('hidden');
-  });
-}
-
-/**
- * Populate the columns area and select boxes after upload
- */
-function populateColumnsUI(rows, types) {
-  const keys = Object.keys(rows[0]);
-  const columnsList = $('#columnsList');
-  columnsList.innerHTML = '';
-
-  // show list with type badges
-  keys.forEach(k => {
-    const p = document.createElement('p');
-    p.className = 'flex items-center justify-between';
-    const left = document.createElement('span');
-    left.textContent = k;
-    const right = document.createElement('span');
-    right.className = 'text-xs px-2 py-0.5 rounded-full border';
-    right.textContent = types[k] || 'unknown';
-    right.classList.add(types[k] === 'numeric' ? 'border-green-200 text-green-700' : 'border-slate-200 text-slate-600');
-    p.appendChild(left);
-    p.appendChild(right);
-    columnsList.appendChild(p);
-  });
-
-  // fill select controls
-  const fillSelect = (sel, includeAll = false) => {
-    sel.innerHTML = '';
-    keys.forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k;
-      opt.textContent = k + (types[k] ? ` (${types[k]})` : '');
-      sel.appendChild(opt);
-    });
-  };
-
-  fillSelect($('#labelColumn'));
-  fillSelect($('#valueColumn'));
-  fillSelect($('#xColumn'));
-  fillSelect($('#yColumn'));
-  fillSelect($('#sizeColumn'));
-}
-
-/**
- * Try to pick sensible defaults for label/value/x/y/size
- */
-function autoSelectColumns() {
-  if (!uploadedRows || !columnTypes) return;
-  const headers = Object.keys(columnTypes);
-  const numeric = headers.filter(h => columnTypes[h] === 'numeric');
-  const categorical = headers.filter(h => columnTypes[h] === 'categorical');
-
-  // heuristics:
-  // - label: first categorical or first header
-  // - value: first numeric
-  // - bubble: x,y,size = first 3 numeric
-  const labelCol = (categorical[0] || headers[0]) || '';
-  const valueCol = (numeric[0] || headers[1] || headers[0]) || '';
-
-  $('#labelColumn').value = labelCol;
-  $('#valueColumn').value = valueCol;
-
-  const xCol = numeric[0] || headers[0] || '';
-  const yCol = numeric[1] || headers[1] || '';
-  const sCol = numeric[2] || numeric[0] || '';
-
-  $('#xColumn').value = xCol;
-  $('#yColumn').value = yCol;
-  $('#sizeColumn').value = sCol;
-
-  // set chart type selector to auto (user can change)
-  $('#chartTypeSelect').value = 'auto';
-  currentChartType = 'auto';
-}
-
-/* ============================
-   Startup
-   ============================ */
-
-window.addEventListener('DOMContentLoaded', () => {
-  // initialize map
-  initMap();
-
-  // wire up UI
-  setupUI();
-
-  // small accessibility helpers: show uploaded tab if query param present
-  if (location.search.includes('uploaded')) {
-    $('#uploadedDataSection').classList.remove('hidden');
-  }
-});
+/* =========================
+   End of file
+   ========================= */
