@@ -1,406 +1,518 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enterprise Data Visualization Dashboard | Premium Analytics Suite</title>
-    
-    <!-- External Libraries -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Custom Styles -->
-    <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DataViz Pro — Dashboard</title>
+
+  <!-- Libraries -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
+  <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --card-bg:#ffffff;
+      --muted:#6c757d;
+      --accent:#2563eb;
+      --radius:12px;
+      --shadow: 0 6px 20px rgba(16,24,40,0.06);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+    body{background:#f5f7fb; color:#0f172a; margin:0; font-size:14px;}
+    .dashboard-wrapper{display:flex; min-height:100vh;}
+    aside.sidebar{width:260px; background:#0b1220; color:#fff; padding:18px; box-shadow: 4px 0 20px rgba(2,6,23,0.06);}
+    .sidebar .logo-text h1{font-size:20px; margin:0; letter-spacing:0.2px;}
+    .sidebar .logo-text p{font-size:12px; margin:0; opacity:.8;}
+    main.main-content{flex:1; padding:20px 28px;}
+    .content-header{display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px;}
+    .content-header h2{margin:0; font-weight:600;}
+    .filters-bar{background:var(--card-bg); padding:14px; border-radius:var(--radius); box-shadow:var(--shadow); display:flex; gap:12px; align-items:center; flex-wrap:wrap;}
+    .filter-dropdown{min-width:220px;}
+    .multi-select-menu{max-height:220px; overflow:auto; padding:8px;}
+    .filter-actions{margin-left:auto; display:flex; gap:8px; align-items:center;}
+    .viz-row{display:flex; gap:18px; margin-top:18px; align-items:flex-start;}
+    .viz-col{flex:1; background:var(--card-bg); border-radius:12px; padding:12px; box-shadow:var(--shadow);}
+    .chart-header, .map-header{display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px;}
+    .chart-actions .btn, .map-actions .btn{margin-left:6px;}
+    canvas#mainChart{max-height:420px; width:100% !important;}
+    #map{height:420px; border-radius:10px;}
+    .table-section{margin-top:18px; background:var(--card-bg); padding:12px; border-radius:12px; box-shadow:var(--shadow);}
+    .table-wrapper{max-height:320px; overflow:auto; border-radius:8px;}
+    table.table thead th{position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #e6e9ef;}
+    .compact-table td, .compact-table th{padding:.45rem .6rem; vertical-align:middle;}
+    .badge-status{font-size:12px; padding:.35em .6em; border-radius:999px; background:#eef2ff; color:var(--accent);}
+    /* dropdown checkbox style */
+    .dropdown-item input[type="checkbox"]{margin-right:8px;}
+    /* small adjustments */
+    .control-small{height:38px; padding:.375rem .6rem;}
+    @media(max-width:992px){
+      .viz-row{flex-direction:column;}
+      aside.sidebar{display:none;}
+    }
+  </style>
 </head>
-<body class="theme-light">
-    
-    <!-- Theme Toggle & Settings -->
-    <div class="floating-controls">
-        <button id="themeToggle" class="control-btn" title="Toggle Theme">
-            <i class="fas fa-moon"></i>
-        </button>
-        <button id="colorSchemeBtn" class="control-btn" title="Color Schemes">
-            <i class="fas fa-palette"></i>
-        </button>
-        <button id="settingsBtn" class="control-btn" title="Settings">
-            <i class="fas fa-cog"></i>
-        </button>
-    </div>
+<body>
+  <div class="dashboard-wrapper">
+    <!-- Sidebar (kept simple) -->
+    <aside class="sidebar">
+      <div class="mb-3 d-flex align-items-center gap-2">
+        <div class="rounded-circle bg-white text-dark d-flex align-items-center justify-content-center" style="width:44px;height:44px;">
+          <i class="fas fa-chart-line"></i>
+        </div>
+        <div>
+          <h1 style="font-size:16px;margin:0">DataViz Pro</h1>
+          <small style="opacity:.85">Enterprise Analytics</small>
+        </div>
+      </div>
 
-<!-- Main Dashboard Container -->
-<div class="dashboard-wrapper">
-    
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-header">
-            <div class="logo-container">
-                <img src="attached_assets/logo.jpg" alt="DataViz Pro Logo" class="logo-image">
+      <div class="mt-4">
+        <button id="uploadBtn" class="btn btn-sm btn-outline-light w-100 mb-2"><i class="fas fa-upload me-2"></i> Upload Data</button>
+        <button id="resetBtn" class="btn btn-sm btn-outline-light w-100 mb-2"><i class="fas fa-eraser me-2"></i> Reset Demo</button>
+      </div>
+
+      <hr style="border-color:rgba(255,255,255,0.06)">
+      <div class="text-white-50">
+        <h6 class="mb-1">Dataset Overview</h6>
+        <div class="d-flex gap-3">
+          <div>
+            <div style="font-size:18px;font-weight:600" id="rowCount">0</div>
+            <small class="text-muted">Rows</small>
+          </div>
+          <div>
+            <div style="font-size:18px;font-weight:600" id="colCount">0</div>
+            <small class="text-muted">Cols</small>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main-content">
+      <div class="content-header">
+        <div>
+          <h2>Analytics Dashboard</h2>
+          <p class="text-muted mb-0">Filters on top — chart and map side-by-side. Click pins to view vendor portfolio.</p>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+          <div class="input-group">
+            <span class="input-group-text"><i class="fas fa-search"></i></span>
+            <input id="globalSearch" class="form-control control-small" placeholder="Global search..." />
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters Bar (Top) -->
+      <div class="filters-bar" id="filtersBar">
+        <!-- Example multi-select dropdown: Vendor Type -->
+        <div class="dropdown filter-dropdown">
+          <button class="btn btn-outline-secondary dropdown-toggle control-small" type="button" id="ddVendorType" data-bs-toggle="dropdown" aria-expanded="false">
+            Vendor Type <small class="text-muted ms-2" id="vendorTypeCount">(All)</small>
+          </button>
+          <div class="dropdown-menu p-2 multi-select-menu" aria-labelledby="ddVendorType">
+            <div class="form-check">
+              <input class="form-check-input vendor-type-checkbox" type="checkbox" value="Retail" id="vtRetail" checked>
+              <label class="form-check-label" for="vtRetail">Retail</label>
             </div>
-            <button class="sidebar-toggle" id="sidebarToggle">
-                <i class="fas fa-bars"></i>
-            </button>
+            <div class="form-check">
+              <input class="form-check-input vendor-type-checkbox" type="checkbox" value="Wholesale" id="vtWholesale" checked>
+              <label class="form-check-label" for="vtWholesale">Wholesale</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input vendor-type-checkbox" type="checkbox" value="Services" id="vtServices" checked>
+              <label class="form-check-label" for="vtServices">Services</label>
+            </div>
+          </div>
         </div>
 
-        <div class="sidebar-content">
-
-                <!-- Upload Section -->
-                <div class="sidebar-section">
-                    <button class="btn-primary-custom" id="uploadBtn">
-                        <i class="fas fa-cloud-upload-alt"></i>
-                        <span>Upload Data</span>
-                    </button>
-                </div>
-
-                <!-- Quick Stats -->
-                <div class="sidebar-section" id="quickStats" style="display: none;">
-                    <h3 class="section-title">Dataset Overview</h3>
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-table"></i></div>
-                            <div class="stat-info">
-                                <span class="stat-value" id="rowCount">0</span>
-                                <span class="stat-label">Rows</span>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon"><i class="fas fa-columns"></i></div>
-                            <div class="stat-info">
-                                <span class="stat-value" id="colCount">0</span>
-                                <span class="stat-label">Columns</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Filters Section -->
-                <div class="sidebar-section" id="filtersSection" style="display: none;">
-                    <h3 class="section-title">
-                        <i class="fas fa-filter"></i> Filters
-                    </h3>
-                    <div id="filterContainer"></div>
-                    <button class="btn-secondary-custom mt-2" id="clearFilters">
-                        <i class="fas fa-redo"></i> Reset Filters
-                    </button>
-                </div>
-
-                <!-- Export Options -->
-                <div class="sidebar-section" id="exportSection" style="display: none;">
-                    <h3 class="section-title">
-                        <i class="fas fa-download"></i> Export
-                    </h3>
-                    <div class="export-buttons">
-                        <button class="btn-export" id="exportPNG">
-                            <i class="fas fa-image"></i> Chart as PNG
-                        </button>
-                        <button class="btn-export" id="exportExcel">
-                            <i class="fas fa-file-excel"></i> Data as Excel
-                        </button>
-                        <button class="btn-export" id="exportPDF">
-                            <i class="fas fa-file-pdf"></i> Report as PDF
-                        </button>
-                        <button class="btn-export" id="printDashboard">
-                            <i class="fas fa-print"></i> Print
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Insights Panel -->
-                <div class="sidebar-section" id="insightsSection" style="display: none;">
-                    <h3 class="section-title">
-                        <i class="fas fa-lightbulb"></i> AI Insights
-                    </h3>
-                    <div id="insightsContainer" class="insights-list"></div>
-                </div>
+        <!-- Region multi-select -->
+        <div class="dropdown filter-dropdown">
+          <button class="btn btn-outline-secondary dropdown-toggle control-small" type="button" id="ddRegion" data-bs-toggle="dropdown" aria-expanded="false">
+            Region <small class="text-muted ms-2" id="regionCount">(All)</small>
+          </button>
+          <div class="dropdown-menu p-2 multi-select-menu" aria-labelledby="ddRegion">
+            <div class="form-check">
+              <input class="form-check-input region-checkbox" type="checkbox" value="North" id="rgNorth" checked>
+              <label class="form-check-label" for="rgNorth">North</label>
             </div>
-        </aside>
-
-        <!-- Main Content Area -->
-        <main class="main-content">
-            
-            <!-- Top Header -->
-            <header class="content-header">
-                <div class="header-left">
-                    <h2 id="dashboardTitle">Welcome to DataViz Pro</h2>
-                    <p id="dashboardSubtitle">Upload your data to begin advanced analytics</p>
-                </div>
-                <div class="header-right">
-                    <div class="search-box">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="globalSearch" placeholder="Search data...">
-                    </div>
-                </div>
-            </header>
-
-            <!-- Chart Controls -->
-            <div class="controls-panel" id="controlsPanel" style="display: none;">
-                <div class="control-group">
-                    <label>
-                        <i class="fas fa-chart-bar"></i> Chart Type
-                    </label>
-                    <select id="chartType" class="form-select-custom">
-                        <option value="auto">Auto Detect</option>
-                        <option value="bar">Bar Chart</option>
-                        <option value="line">Line Chart</option>
-                        <option value="pie">Pie Chart</option>
-                        <option value="histogram">Histogram</option>
-                        <option value="scatter">Scatter Plot</option>
-                        <option value="area">Area Chart</option>
-                        <option value="boxplot">Box Plot</option>
-                        <option value="heatmap">Heatmap</option>
-                        <option value="bubble">Bubble Chart</option>
-                        <option value="treemap">Tree Map</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <label>
-                        <i class="fas fa-layer-group"></i> Sheet
-                    </label>
-                    <select id="sheetSelect" class="form-select-custom"></select>
-                </div>
-
-                <div class="control-group">
-                    <label>
-                        <i class="fas fa-sort-amount-down"></i> Top N
-                    </label>
-                    <input type="number" id="topN" class="form-control-custom" value="10" min="1" max="100">
-                </div>
-
-                <div class="control-group">
-                    <label>
-                        <i class="fas fa-paint-brush"></i> Color Scheme
-                    </label>
-                    <select id="chartColorScheme" class="form-select-custom">
-                        <option value="default">Default</option>
-                        <option value="corporate">Corporate Blue</option>
-                        <option value="sunset">Sunset Orange</option>
-                        <option value="forest">Forest Green</option>
-                        <option value="royal">Royal Purple</option>
-                        <option value="minimal">Minimal Gray</option>
-                        <option value="vibrant">Vibrant Mix</option>
-                    </select>
-                </div>
-
-                <div class="control-group">
-                    <button class="btn-refresh" id="refreshChart">
-                        <i class="fas fa-sync-alt"></i> Refresh
-                    </button>
-                </div>
+            <div class="form-check">
+              <input class="form-check-input region-checkbox" type="checkbox" value="South" id="rgSouth" checked>
+              <label class="form-check-label" for="rgSouth">South</label>
             </div>
+            <div class="form-check">
+              <input class="form-check-input region-checkbox" type="checkbox" value="West" id="rgWest" checked>
+              <label class="form-check-label" for="rgWest">West</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input region-checkbox" type="checkbox" value="East" id="rgEast" checked>
+              <label class="form-check-label" for="rgEast">East</label>
+            </div>
+          </div>
+        </div>
 
-            <!-- Main Visualization Area -->
-            <div class="viz-container" id="vizContainer">
-                
-                <!-- Welcome Screen -->
-                <div class="welcome-screen" id="welcomeScreen">
-                    <div class="welcome-content animate__animated animate__fadeIn">
-                        <div class="welcome-icon">
-                            <i class="fas fa-cloud-upload-alt"></i>
-                        </div>
-                        <h2>Start Your Data Journey</h2>
-                        <p>Upload Excel or CSV files to unlock powerful visualizations and insights</p>
-                        <button class="btn-large-primary" onclick="document.getElementById('uploadBtn').click()">
-                            <i class="fas fa-plus-circle"></i> Upload Your First Dataset
-                        </button>
-                        <div class="features-grid">
-                            <div class="feature-item">
-                                <i class="fas fa-chart-pie"></i>
-                                <span>10+ Chart Types</span>
-                            </div>
-                            <div class="feature-item">
-                                <i class="fas fa-filter"></i>
-                                <span>Dynamic Filtering</span>
-                            </div>
-                            <div class="feature-item">
-                                <i class="fas fa-map-marked-alt"></i>
-                                <span>Interactive Maps</span>
-                            </div>
-                            <div class="feature-item">
-                                <i class="fas fa-brain"></i>
-                                <span>AI Insights</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <!-- Chart Type -->
+        <select id="chartType" class="form-select control-small" style="min-width:160px;">
+          <option value="bar">Bar (Top N)</option>
+          <option value="pie">Pie</option>
+          <option value="line">Line</option>
+        </select>
 
-         <!-- Charts Grid -->
-<div class="charts-grid" id="chartsGrid" style="display: none;">
-    <!-- Primary Chart (Left) -->
-    <div class="chart-card chart-primary">
-        <div class="chart-header">
-            <h3 id="chartTitle">Data Visualization</h3>
+        <!-- Top N -->
+        <input id="topN" type="number" min="1" value="10" class="form-control control-small" style="width:110px;" title="Top N (for bar/pie)" />
+
+        <div class="filter-actions">
+          <button id="applyFilters" class="btn btn-primary btn-sm"><i class="fas fa-check me-1"></i> Apply</button>
+          <button id="clearFilters" class="btn btn-outline-secondary btn-sm"><i class="fas fa-redo me-1"></i> Reset</button>
+        </div>
+      </div>
+
+      <!-- Chart & Map Row -->
+      <div class="viz-row">
+        <!-- Chart Column -->
+        <div class="viz-col" id="chartColumn" style="min-width:320px;">
+          <div class="chart-header">
+            <h5 id="chartTitle" class="mb-0">Main Chart</h5>
             <div class="chart-actions">
-                <button class="chart-action-btn" id="fullscreenChart" title="Fullscreen">
-                    <i class="fas fa-expand"></i>
-                </button>
-                <button class="chart-action-btn" id="downloadChart" title="Download">
-                    <i class="fas fa-download"></i>
-                </button>
+              <button id="chartFullscreen" class="btn btn-sm btn-outline-secondary" title="Fullscreen"><i class="fas fa-expand"></i></button>
+              <button id="downloadChartBtn" class="btn btn-sm btn-outline-primary" title="Download chart"><i class="fas fa-download"></i></button>
             </div>
-        </div>
-        <div class="chart-body">
+          </div>
+          <div>
             <canvas id="mainChart"></canvas>
-            <div id="heatmapContainer" style="display: none;"></div>
-            <div id="treemapContainer" style="display: none;"></div>
-        </div>
-    </div>
+          </div>
 
-    <!-- India Map (Right) -->
-    <div class="chart-card">
-        <div class="chart-header">
-            <h3><i class="fas fa-map-marker-alt"></i> Geographic Distribution</h3>
-            <span class="badge-status" id="mapStatus">Ready</span>
+          <!-- optional preview table inside chart card -->
+          <div id="previewTableWrapper" class="mt-3" style="display:none;">
+            <h6 class="mb-2">Data preview</h6>
+            <div id="previewTableContainer" class="table-responsive small"></div>
+          </div>
         </div>
-        <div class="chart-body">
-            <div id="indiaMap" style="height: 400px; border-radius: 12px;"></div>
-        </div>
-    </div>
-</div>
 
-<!-- Full Excel-Like Data Table Section (Below) -->
-<div class="table-section" id="tableSection" style="display: none;">
-    <div class="table-header">
-        <h3><i class="fas fa-table"></i> Data Explorer</h3>
-        <div class="table-controls">
-            <input type="text" id="tableSearch" class="form-control-custom" placeholder="Search in table...">
-            <select id="rowsPerPage" class="form-select-custom">
-                <option value="10">10 rows</option>
-                <option value="25" selected>25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-            </select>
-        </div>
-    </div>
-    <div class="table-wrapper">
-        <div id="dataTable"></div>
-    </div>
-    <div class="table-pagination" id="tablePagination"></div>
-</div>
-
-
-    <!-- Upload Modal -->
-    <div class="modal-overlay" id="uploadModal">
-        <div class="modal-container animate__animated animate__zoomIn animate__faster">
-            <div class="modal-header">
-                <h3><i class="fas fa-cloud-upload-alt"></i> Upload Dataset</h3>
-                <button class="modal-close" id="closeModal">
-                    <i class="fas fa-times"></i>
-                </button>
+        <!-- Map Column -->
+        <div class="viz-col" id="mapColumn" style="min-width:320px;">
+          <div class="map-header">
+            <h5 class="mb-0"><i class="fas fa-map-marker-alt me-1"></i> India Map</h5>
+            <div class="map-actions">
+              <span class="badge-status" id="mapStatus">Idle</span>
+              <button id="mapFullscreen" class="btn btn-sm btn-outline-secondary" title="Map Fullscreen"><i class="fas fa-expand"></i></button>
             </div>
-            <div class="modal-body">
-                <div class="dropzone" id="dropzone">
-                    <div class="dropzone-content">
-                        <i class="fas fa-cloud-upload-alt dropzone-icon"></i>
-                        <h4>Drag & Drop your files here</h4>
-                        <p>or click to browse</p>
-                        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
-                        <button class="btn-secondary-custom" onclick="document.getElementById('fileInput').click()">
-                            <i class="fas fa-folder-open"></i> Browse Files
-                        </button>
-                        <div class="file-types">
-                            <span><i class="fas fa-file-excel"></i> Excel (.xlsx, .xls)</span>
-                            <span><i class="fas fa-file-csv"></i> CSV (.csv)</span>
-                        </div>
-                    </div>
-                </div>
-                <div id="uploadProgress" class="upload-progress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <p id="progressText">Processing...</p>
-                </div>
-                <div id="sheetSelector" class="sheet-selector" style="display: none;">
-                    <h4>Select Sheets to Import</h4>
-                    <div id="sheetList" class="sheet-list"></div>
-                    <button class="btn-primary-custom mt-3" id="loadSelectedSheets">
-                        <i class="fas fa-check"></i> Load Selected Sheets
-                    </button>
-                </div>
-            </div>
+          </div>
+          <div id="map"></div>
         </div>
-    </div>
+      </div>
 
-    <!-- Color Scheme Modal -->
-    <div class="modal-overlay" id="colorSchemeModal">
-        <div class="modal-container modal-sm animate__animated animate__fadeIn">
-            <div class="modal-header">
-                <h3><i class="fas fa-palette"></i> Theme Gallery</h3>
-                <button class="modal-close" onclick="closeColorSchemeModal()">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="theme-grid">
-                    <div class="theme-option" data-theme="corporate">
-                        <div class="theme-preview theme-corporate"></div>
-                        <span>Corporate Blue</span>
-                    </div>
-                    <div class="theme-option" data-theme="sunset">
-                        <div class="theme-preview theme-sunset"></div>
-                        <span>Sunset Orange</span>
-                    </div>
-                    <div class="theme-option" data-theme="forest">
-                        <div class="theme-preview theme-forest"></div>
-                        <span>Forest Green</span>
-                    </div>
-                    <div class="theme-option" data-theme="royal">
-                        <div class="theme-preview theme-royal"></div>
-                        <span>Royal Purple</span>
-                    </div>
-                    <div class="theme-option" data-theme="minimal">
-                        <div class="theme-preview theme-minimal"></div>
-                        <span>Minimal Gray</span>
-                    </div>
-                    <div class="theme-option" data-theme="vibrant">
-                        <div class="theme-preview theme-vibrant"></div>
-                        <span>Vibrant Mix</span>
-                    </div>
-                </div>
-            </div>
+      <!-- Data Table -->
+      <div class="table-section">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0"><i class="fas fa-table me-1"></i> Full Data Table</h6>
+          <div class="d-flex gap-2">
+            <input id="tableSearch" class="form-control form-control-sm" placeholder="Search rows..." style="min-width:160px;">
+            <button id="exportCsvBtn" class="btn btn-outline-secondary btn-sm" disabled><i class="fas fa-file-csv me-1"></i>Export CSV</button>
+          </div>
         </div>
-    </div>
 
-    <!-- External Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-boxplot@4.2.4/build/index.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-matrix@2.0.1/dist/chartjs-chart-matrix.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-    
-    <!-- Register Chart.js Plugins -->
-    <script>
-        // Register Chart.js plugins for advanced chart types
-        if (typeof Chart !== 'undefined') {
-            // Register all available Chart.js controllers and elements from plugins
-            
-            // BoxPlot plugin - register all components
-            if (typeof ChartBoxPlot !== 'undefined' && ChartBoxPlot.registerables) {
-                Chart.register(...ChartBoxPlot.registerables);
-            }
-            
-            // TreeMap plugin
-            if (typeof ChartTreemap !== 'undefined') {
-                Chart.register(ChartTreemap.TreemapController, ChartTreemap.TreemapElement);
-            }
-            
-            // Matrix plugin for heatmaps
-            if (typeof ChartMatrix !== 'undefined') {
-                Chart.register(ChartMatrix.MatrixController, ChartMatrix.MatrixElement);
-            }
-            
-            console.log('✅ Chart.js plugins registered successfully');
+        <div class="table-wrapper">
+          <table class="table table-hover compact-table mb-0">
+            <thead class="bg-white">
+              <tr>
+                <th>Vendor</th>
+                <th>Type</th>
+                <th>Region</th>
+                <th>Revenue</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+              </tr>
+            </thead>
+            <tbody id="dataTableBody">
+              <!-- Filled by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- External Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Main Script (demo-ready implementation) -->
+  <script>
+    /*******************************
+     * Demo dataset — replace with real data import later
+     *******************************/
+    const vendors = [
+      { id:1, name:"Asha Mart", type:"Retail", region:"North", revenue:120000, lat:28.6139, lng:77.2090, portfolio: "<strong>Asha Mart</strong><br/>Retail chain with 5 outlets. Services: FMCG, Electronics.<br/><a href='#'>View more</a>" },
+      { id:2, name:"Kala Wholesalers", type:"Wholesale", region:"West", revenue:300000, lat:19.0760, lng:72.8777, portfolio: "<strong>Kala Wholesalers</strong><br/>Bulk suppliers for garments.<br/><a href='#'>View portfolio</a>" },
+      { id:3, name:"Suryan Services", type:"Services", region:"South", revenue:90000, lat:13.0827, lng:80.2707, portfolio: "<strong>Suryan Services</strong><br/>Consulting & Logistics.<br/><a href='#'>Profile</a>" },
+      { id:4, name:"Greenfield Trade", type:"Wholesale", region:"North", revenue:210000, lat:28.4595, lng:77.0266, portfolio: "<strong>Greenfield Trade</strong><br/>Agriculture produce wholesale.<br/><a href='#'>Open</a>" },
+      { id:5, name:"Bengal Retail", type:"Retail", region:"East", revenue:150000, lat:22.5726, lng:88.3639, portfolio: "<strong>Bengal Retail</strong><br/>Multiple supermarket branches.<br/><a href='#'>View</a>" },
+      { id:6, name:"Coastal Vendors", type:"Services", region:"South", revenue:60000, lat:9.9312, lng:76.2673, portfolio: "<strong>Coastal Vendors</strong><br/>Local services & repairs.<br/><a href='#'>More</a>" }
+    ];
+
+    // initial state
+    let state = {
+      chartType: 'bar',
+      topN: 10,
+      vendorTypes: ['Retail','Wholesale','Services'],
+      regions: ['North','South','East','West']
+    };
+
+    /*******************************
+     * UI helpers
+     *******************************/
+    function updateCounts(){
+      document.getElementById('rowCount').innerText = vendors.length;
+      document.getElementById('colCount').innerText = 6;
+      const vtChecked = Array.from(document.querySelectorAll('.vendor-type-checkbox:checked')).map(i=>i.value);
+      const rgChecked = Array.from(document.querySelectorAll('.region-checkbox:checked')).map(i=>i.value);
+      document.getElementById('vendorTypeCount').innerText = `(${vtChecked.length})`;
+      document.getElementById('regionCount').innerText = `(${rgChecked.length})`;
+    }
+
+    /*******************************
+     * Chart Setup (Chart.js)
+     *******************************/
+    const ctx = document.getElementById('mainChart').getContext('2d');
+
+    const chartConfig = {
+      type: 'bar',
+      data: {labels: [], datasets: [{ label:'Revenue', data: [], backgroundColor: [] }]},
+      options: {
+        responsive:true,
+        maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{mode:'index', intersect:false}
+        },
+        scales:{
+          x:{ticks:{maxRotation:0, autoSkip:true}},
+          y:{beginAtZero:true}
         }
-    </script>
-    
-    <!-- Custom Script -->
-    <script src="script.js"></script>
+      }
+    };
+    let mainChart = new Chart(ctx, chartConfig);
+
+    function buildColor(i){ // simple palette
+      const palette = ["#2563eb","#06b6d4","#f97316","#10b981","#7c3aed","#ef4444","#f59e0b","#0ea5a4"];
+      return palette[i % palette.length];
+    }
+
+    function applyFiltersAndRender(){
+      // read filters
+      const selectedTypes = Array.from(document.querySelectorAll('.vendor-type-checkbox:checked')).map(i=>i.value);
+      const selectedRegions = Array.from(document.querySelectorAll('.region-checkbox:checked')).map(i=>i.value);
+      const topN = parseInt(document.getElementById('topN').value || '10',10);
+      state.chartType = document.getElementById('chartType').value;
+      state.topN = topN;
+
+      // filter dataset
+      let filtered = vendors.filter(v => selectedTypes.includes(v.type) && selectedRegions.includes(v.region));
+
+      // optional global search
+      const globalSearch = document.getElementById('globalSearch').value.trim().toLowerCase();
+      if(globalSearch){
+        filtered = filtered.filter(v => (v.name + ' ' + v.type + ' ' + v.region).toLowerCase().includes(globalSearch));
+      }
+
+      // table
+      renderTable(filtered);
+
+      // update map markers
+      renderMapMarkers(filtered);
+
+      // prepare chart data: top N by revenue
+      const sorted = filtered.slice().sort((a,b)=>b.revenue - a.revenue).slice(0, topN);
+      const labels = sorted.map(s=>s.name);
+      const data = sorted.map(s=>s.revenue);
+      const colors = sorted.map((_,i)=>buildColor(i));
+
+      // update chart config depending on type
+      if(state.chartType === 'pie'){
+        mainChart.destroy();
+        mainChart = new Chart(ctx, {
+          type: 'pie',
+          data: { labels, datasets: [{ data, backgroundColor: colors }]},
+          options:{responsive:true, maintainAspectRatio:false}
+        });
+      } else if(state.chartType === 'line'){
+        mainChart.destroy();
+        mainChart = new Chart(ctx, {
+          type: 'line',
+          data: { labels, datasets: [{ label:'Revenue', data, borderColor: colors[0], backgroundColor: 'rgba(0,0,0,0)' }]},
+          options:{responsive:true, maintainAspectRatio:false}
+        });
+      } else { // bar
+        mainChart.destroy();
+        mainChart = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets: [{ label:'Revenue', data, backgroundColor: colors }]},
+          options:{responsive:true, maintainAspectRatio:false}
+        });
+      }
+
+      // update UI counts
+      updateCounts();
+
+      // update map status
+      document.getElementById('mapStatus').innerText = filtered.length ? `${filtered.length} pins` : 'No pins';
+    }
+
+    /*******************************
+     * Table rendering
+     *******************************/
+    function renderTable(list){
+      const tbody = document.getElementById('dataTableBody');
+      tbody.innerHTML = '';
+      if(!list.length){
+        tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No records found</td></tr>';
+        return;
+      }
+      for(const v of list){
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${v.name}</td>
+          <td>${v.type}</td>
+          <td>${v.region}</td>
+          <td>₹ ${v.revenue.toLocaleString()}</td>
+          <td>${v.lat.toFixed(4)}</td>
+          <td>${v.lng.toFixed(4)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    /*******************************
+     * Leaflet Map + Markers
+     *******************************/
+    let map = L.map('map', {preferCanvas:true}).setView([22.0,79.0], 5);
+
+    // tile layer (open-source)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    let markerLayer = L.layerGroup().addTo(map);
+    function renderMapMarkers(list){
+      markerLayer.clearLayers();
+      list.forEach(v=>{
+        if(!v.lat || !v.lng) return;
+        const marker = L.marker([v.lat, v.lng]).addTo(markerLayer);
+        // tooltip on hover
+        marker.bindTooltip(`<strong>${v.name}</strong><br/>${v.type} — ${v.region}`, {direction:'top'});
+        // popup on click with portfolio HTML
+        marker.on('click', () => {
+          L.popup({maxWidth:320})
+            .setLatLng([v.lat, v.lng])
+            .setContent(`<div style="min-width:220px">${v.portfolio}</div>`)
+            .openOn(map);
+        });
+      });
+
+      // fit bounds if markers exist
+      if(list.length){
+        const bounds = L.latLngBounds(list.filter(l=>l.lat && l.lng).map(l => [l.lat, l.lng]));
+        if(bounds.isValid()) map.fitBounds(bounds.pad(0.2));
+      }
+    }
+
+    /*******************************
+     * Fullscreen handlers
+     *******************************/
+    function toggleFullscreen(el){
+      if(!document.fullscreenElement){
+        el.requestFullscreen && el.requestFullscreen();
+      } else {
+        document.exitFullscreen && document.exitFullscreen();
+      }
+    }
+    document.getElementById('chartFullscreen').addEventListener('click', ()=>{
+      toggleFullscreen(document.getElementById('chartColumn'));
+    });
+    document.getElementById('mapFullscreen').addEventListener('click', ()=>{
+      toggleFullscreen(document.getElementById('mapColumn'));
+      setTimeout(()=>{ map.invalidateSize(); }, 300);
+    });
+
+    /*******************************
+     * Download chart as PNG
+     *******************************/
+    document.getElementById('downloadChartBtn').addEventListener('click', ()=>{
+      const link = document.createElement('a');
+      link.href = document.getElementById('mainChart').toDataURL('image/png',1);
+      link.download = 'chart.png';
+      link.click();
+    });
+
+    /*******************************
+     * Filters UI events
+     *******************************/
+    document.getElementById('applyFilters').addEventListener('click', ()=> applyFiltersAndRender());
+    document.getElementById('clearFilters').addEventListener('click', ()=>{
+      // check all filters
+      document.querySelectorAll('.vendor-type-checkbox, .region-checkbox').forEach(cb => cb.checked = true);
+      document.getElementById('globalSearch').value = '';
+      document.getElementById('topN').value = 10;
+      document.getElementById('chartType').value = 'bar';
+      applyFiltersAndRender();
+    });
+
+    // update counts when checkboxes change
+    document.querySelectorAll('.vendor-type-checkbox, .region-checkbox').forEach(cb=>{
+      cb.addEventListener('change', ()=> updateCounts());
+    });
+
+    // search in table
+    document.getElementById('tableSearch').addEventListener('input', (e)=>{
+      const q = e.target.value.trim().toLowerCase();
+      const rows = Array.from(document.querySelectorAll('#dataTableBody tr'));
+      for(const r of rows){
+        const text = r.innerText.toLowerCase();
+        r.style.display = text.includes(q) ? '' : 'none';
+      }
+    });
+
+    // global search triggers a filter apply
+    document.getElementById('globalSearch').addEventListener('input', ()=>{
+      // small debounce
+      clearTimeout(window._gsdeb);
+      window._gsdeb = setTimeout(()=> applyFiltersAndRender(), 350);
+    });
+
+    // topN immediate
+    document.getElementById('topN').addEventListener('change', ()=> applyFiltersAndRender());
+    document.getElementById('chartType').addEventListener('change', ()=> applyFiltersAndRender());
+
+    /*******************************
+     * Init demo content
+     *******************************/
+    function initDemo(){
+      // show all initial
+      document.querySelectorAll('.vendor-type-checkbox, .region-checkbox').forEach(cb => cb.checked = true);
+      // render initial
+      applyFiltersAndRender();
+    }
+
+    // small demo: reset button will re-center map and reset filters
+    document.getElementById('resetBtn').addEventListener('click', ()=>{
+      document.getElementById('globalSearch').value = '';
+      document.querySelectorAll('.vendor-type-checkbox, .region-checkbox').forEach(cb => cb.checked = true);
+      applyFiltersAndRender();
+    });
+
+    // initial call
+    initDemo();
+
+    // resize handler to keep map correct
+    window.addEventListener('resize', ()=> { setTimeout(()=> map.invalidateSize(), 200); });
+
+    /*******************************
+     * Replaceable spots:
+     * - Replace vendors[] with actual data parsed from uploaded file (XLSX / CSV)
+     * - Hook uploadBtn -> file input + parsing, then update vendors and call applyFiltersAndRender()
+     *******************************/
+  </script>
 </body>
 </html>
