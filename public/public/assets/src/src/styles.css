@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* small UI niceties */
+html, body, #root { height: 100%; }
+.leaflet-container { height: 100%; width: 100%; border-radius: 12px; }
+.panel { background: rgba(255,255,255,0.03); backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,0.04); border-radius: 12px; }
+.button-glass {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.card-title { font-weight: 700; }
+.small-muted { color: rgba(255,255,255,0.6); font-size: 12px; }
